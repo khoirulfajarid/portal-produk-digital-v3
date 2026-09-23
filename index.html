@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="id" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Digital Product Hub</title>
+  <meta name="description" content="Kelas, aplikasi, dan materi digital dalam satu portal.">
+  <meta name="theme-color" content="#0D9488">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230D9488'/%3E%3Cpath d='M20 22h14a10 10 0 010 20H20z' fill='%23fff'/%3E%3C/svg%3E">
+
+  <!-- Inter — satu-satunya typeface (DESIGN.md) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS (CDN Play) — sama seperti v2.0 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: ['class', '[data-theme="dark"]'],
+      theme: { extend: {
+        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
+        borderRadius: { '2xl': '1rem', '3xl': '1.5rem' }
+      } }
+    };
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.446.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/datatables.net-dt@1.13.8/css/jquery.dataTables.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/datatables.net@1.13.8/js/jquery.dataTables.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
+  <!-- Google Identity Services — Sign in with Google (Superadmin) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+
+<body class="antialiased layout-public">
+
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner-lg"></div>
+    <p class="mt-4 text-sm text-muted">Memuat aplikasi…</p>
+  </div>
+
+  <!-- ══════════ NAV PUBLIK (Open Access & Login) ══════════ -->
+  <header id="pubnav" class="topnav" hidden>
+    <div class="topnav-inner">
+      <button type="button" class="pub-brand flex items-center gap-2.5 min-w-0 text-[17px] font-bold tracking-tight text-main" onclick="go('explore')"></button>
+      <nav class="hidden md:flex items-center gap-1">
+        <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secApps'),50)">Aplikasi</button>
+        <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secClass'),50)">Kelas & Bootcamp</button>
+        <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secShow'),50)">Karya Member</button>
+      </nav>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="toggleDarkMode()" class="icon-btn" title="Ganti tema"><i data-lucide="moon-star" class="w-[18px] h-[18px]"></i></button>
+        <button type="button" onclick="openRedeemDialog()" class="btn-ghost !w-auto !py-2 !px-3 hidden sm:inline-flex"><i data-lucide="key-round" class="w-4 h-4"></i> Redeem</button>
+        <button type="button" onclick="go('login')" class="btn-primary !w-auto !py-2 !px-4"><i data-lucide="log-in" class="w-4 h-4"></i> Masuk</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ══════════ NAV MEMBER ══════════ -->
+  <header id="topnav" class="topnav" hidden>
+    <div class="topnav-inner">
+      <button type="button" id="topnavBrand" class="flex items-center gap-2.5 min-w-0 text-[17px] font-bold tracking-tight text-main" onclick="go('home')"></button>
+      <nav id="topnavMenu" class="hidden md:flex items-center gap-1"></nav>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="openRedeemDialog()" class="btn-primary !w-auto !py-2 !px-4 hidden sm:inline-flex"><i data-lucide="key-round" class="w-4 h-4"></i> Redeem Kode</button>
+        <button type="button" onclick="toggleDarkMode()" class="icon-btn" title="Ganti tema"><i data-lucide="moon-star" class="w-[18px] h-[18px]"></i></button>
+        <button type="button" onclick="logout()" class="icon-btn" title="Keluar"><i data-lucide="log-out" class="w-[18px] h-[18px]"></i></button>
+        <button type="button" id="avatar" class="avatar" onclick="openProfileDialog()" title="Profil">U</button>
+      </div>
+    </div>
+    <nav id="topnavMobile" class="md:hidden border-t border-app px-3 py-2 flex gap-1 overflow-x-auto"></nav>
+  </header>
+
+  <!-- ══════════ SIDEBAR SUPERADMIN ══════════ -->
+  <button type="button" id="adminBurger" class="admin-burger" onclick="toggleSidebar()" aria-label="Buka menu"><i data-lucide="menu" class="w-5 h-5"></i></button>
+  <aside id="sidebar" class="sidebar" hidden>
+    <div class="sidebar-brand">
+      <div id="brandBadge" class="brand-badge">A</div>
+      <div class="min-w-0">
+        <p id="brandName" class="brand-title truncate">Admin Central</p>
+        <p class="brand-sub truncate" id="adminWho">Superadmin</p>
+      </div>
+    </div>
+    <nav class="sidebar-nav"><ul id="sidebarMenu" class="space-y-0.5"></ul></nav>
+    <div class="sidebar-foot">
+      <button type="button" onclick="go('admin/products');setTimeout(()=>openProductForm(),50)" class="btn-primary w-full mb-3"><i data-lucide="plus" class="w-4 h-4"></i> Produk Baru</button>
+      <button type="button" onclick="openLink(location.pathname + '#/explore')" class="sidebar-link w-full"><i data-lucide="globe" class="w-[18px] h-[18px]"></i> <span>Lihat Halaman Publik</span></button>
+      <button type="button" onclick="toggleDarkMode()" class="sidebar-link w-full"><i data-lucide="moon-star" class="w-[18px] h-[18px]"></i> <span>Mode Gelap</span></button>
+      <button type="button" onclick="logout()" class="sidebar-link sidebar-link-danger w-full"><i data-lucide="log-out" class="w-[18px] h-[18px]"></i> <span>Keluar</span></button>
+    </div>
+  </aside>
+  <div id="sidebarScrim" class="sidebar-scrim" onclick="closeSidebar()"></div>
+
+  <!-- ══════════ KONTAINER SPA ══════════ -->
+  <main id="mainContent" class="main-content"><div id="app-container"></div></main>
+
+  <!-- ══════════ MODAL PRATINJAU ══════════ -->
+  <div id="previewModal" class="modal-backdrop" hidden onclick="if(event.target===this)closePreview()">
+    <div class="modal-panel">
+      <div class="modal-head">
+        <h3 id="previewTitle" class="text-base font-semibold text-main truncate">Pratinjau</h3>
+        <button type="button" class="icon-btn" onclick="closePreview()" aria-label="Tutup"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div id="previewBody" class="modal-body"></div>
+      <div class="modal-foot">
+        <button type="button" class="btn-ghost !w-auto" onclick="closePreview()"><i data-lucide="x" class="w-4 h-4"></i> Tutup</button>
+        <a id="previewDownload" href="#" class="btn-primary !w-auto"><i data-lucide="download" class="w-4 h-4"></i> Unduh</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ MODAL CHECKOUT (alur beli v2.0) ══════════ -->
+  <div id="checkoutModal" class="modal-backdrop" hidden>
+    <div class="modal-panel" style="max-width:620px">
+      <div class="modal-head">
+        <div class="min-w-0"><h3 class="text-base font-semibold text-main">Pembelian Produk</h3><p id="coProductName" class="text-xs text-muted truncate"></p></div>
+        <button type="button" class="icon-btn" onclick="closeCheckout()" aria-label="Tutup"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="stepper">
+        <div class="step is-active" data-step="1"><span class="step-dot">1</span><span class="step-label">Rincian</span></div><div class="step-line"></div>
+        <div class="step" data-step="2"><span class="step-dot">2</span><span class="step-label">Pembayaran</span></div><div class="step-line"></div>
+        <div class="step" data-step="3"><span class="step-dot">3</span><span class="step-label">Bukti Transfer</span></div>
+      </div>
+      <div class="modal-body" style="background:var(--surface)">
+        <section id="coStep1">
+          <div class="price-box"><p class="stat-label">Total yang harus dibayar</p><p id="coPrice" class="price-value">—</p>
+            <p class="text-xs text-muted mt-2">Pembayaran diverifikasi manual oleh Admin. Akses terbuka otomatis setelah disetujui.</p></div>
+          <div id="coSummary" class="mt-5"></div>
+          <button class="btn-primary w-full mt-6" onclick="coGoStep(2)"><i data-lucide="arrow-right" class="w-4 h-4"></i> Lanjut Pilih Pembayaran</button>
+        </section>
+        <section id="coStep2" hidden>
+          <p class="form-label mb-3">Pilih channel pembayaran</p><div id="coChannels" class="space-y-3"></div>
+          <div class="flex gap-3 mt-6">
+            <button class="btn-ghost flex-1" onclick="coGoStep(1)"><i data-lucide="arrow-left" class="w-4 h-4"></i> Kembali</button>
+            <button id="coNext2" class="btn-primary flex-1" onclick="coGoStep(3)" disabled>Lanjut <i data-lucide="arrow-right" class="w-4 h-4"></i></button>
+          </div>
+        </section>
+        <section id="coStep3" hidden>
+          <p class="form-label mb-2">Unggah bukti transfer</p>
+          <div id="coDrop" class="dropzone"><i data-lucide="upload-cloud" class="w-7 h-7 mx-auto mb-2"></i><p class="text-sm font-semibold">Klik atau seret gambar ke sini</p><p class="text-xs mt-1">JPG, PNG, atau PDF · maks. 10 MB</p></div>
+          <input type="file" id="coFile" class="hidden" accept="image/*,.pdf">
+          <div id="coProofPreview" class="mt-3"></div>
+          <div class="mt-4"><label class="form-label" for="coNote">Catatan (opsional)</label><textarea id="coNote" rows="2" class="form-input" placeholder="Nama pengirim, jam transfer, dll."></textarea></div>
+          <div class="flex gap-3 mt-6">
+            <button class="btn-ghost flex-1" onclick="coGoStep(2)"><i data-lucide="arrow-left" class="w-4 h-4"></i> Kembali</button>
+            <button id="coSubmit" class="btn-primary flex-1" onclick="submitOrder()" disabled><i data-lucide="send" class="w-4 h-4"></i> Kirim Pesanan</button>
+          </div>
+        </section>
+        <section id="coStep4" class="text-center" hidden>
+          <div class="w-16 h-16 mx-auto rounded-2xl grid place-items-center" style="background:rgba(245,158,11,.14);color:var(--warning)"><i data-lucide="clock" class="w-8 h-8"></i></div>
+          <h3 class="mt-4 text-lg font-semibold text-main">Menunggu Verifikasi Admin</h3>
+          <p class="mt-2 text-sm text-muted max-w-sm mx-auto">Pesanan Anda sudah kami terima. Akses produk terbuka otomatis begitu Admin menyetujui pembayaran.</p>
+          <p id="coOrderId" class="mono mt-3 text-sm"></p>
+          <div class="flex flex-col sm:flex-row gap-3 mt-6">
+            <button class="btn-ghost flex-1" onclick="closeCheckout(); go('orders');"><i data-lucide="receipt" class="w-4 h-4"></i> Lihat Pesanan Saya</button>
+            <a id="coContactAdmin" href="#" class="btn-primary flex-1"><i data-lucide="life-buoy" class="w-4 h-4"></i> Hubungi Admin</a>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastStack" class="toast-stack"></div>
+
+  <!-- Urutan penting: config → core → modul -->
+  <script src="js/config.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/public.js"></script>
+  <script src="js/member.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/admin-people.js"></script>
+  <script src="js/admin-content.js"></script>
+  <script src="js/admin-ops.js"></script>
+</body>
+</html>
