@@ -61,7 +61,10 @@ async function api(action, data, opts) {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: action, token: AppState.token || '', data: data || {} })
     });
-    const json = await res.json();
+    const text = await res.text();
+    let json;
+    try { json = JSON.parse(text); }
+    catch (e) { return { success: false, network: true, message: 'Server membalas HTTP ' + res.status + ' berupa halaman, bukan data JSON. Biasanya URL /exec salah, deployment sudah dihapus, atau akses Web App belum "Anyone".' }; }
     if (!json.success && json.data && json.data.code === 'AUTH' && !opts.silentAuth) onSessionExpired();
     return json;
   } catch (err) {

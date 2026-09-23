@@ -18,8 +18,13 @@ const Public = {
       if (AppState.currentPage === 'login') Login.initGoogle();
       renderPubnav();
       if (document.body.classList.contains('layout-admin') && typeof renderSidebarBrand === 'function') renderSidebarBrand();
-    }, { toastError: false });
-  }
+    }, { toastError: false }).then(res => {
+      Public.lastError = res && !res.success ? (res.message || 'Server tidak merespons.') : '';
+      if (AppState.currentPage === 'login') Login.initGoogle();
+      return res;
+    });
+  },
+  lastError: ''
 };
 
 // ════════════════════════════════════════════════════════════
@@ -351,13 +356,30 @@ const Login = {
     const box = document.getElementById('gsiButton');
     if (!box) return;
     const cid = AppState.pub && AppState.pub.googleClientId;
-    if (!cid) { box.innerHTML = '<p class="text-sm text-muted text-center">Memuat Sign in with Google…</p>'; return; }
-    if (!window.google || !google.accounts || !google.accounts.id) { setTimeout(() => Login.initGoogle(), 400); return; }
+    const retryBtn = '<button type="button" class="btn-ghost !w-auto !py-1.5 mt-3" onclick="Login.retryGoogle()"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Coba lagi</button>';
+    const diag = (title, msg) => { box.innerHTML = '<div class="notice notice-error text-left"><i data-lucide="alert-triangle" class="w-5 h-5 flex-none"></i><div class="flex-1 text-sm"><b>' + esc(title) + '</b><br>' + msg + '</div></div>' + '<div class="text-center">' + retryBtn + '</div>'; box.style.flexDirection = 'column'; refreshIcons(); };
+    if (!cid) {
+      if (Public.lastError) return diag('Tidak bisa terhubung ke server (Apps Script)', esc(Public.lastError) + '<br>Periksa <code>GAS_URL</code> di <code>js/config.js</code> dan pastikan deploy Web App: <i>Execute as: Me</i>, <i>Who has access: Anyone</i>.');
+      if (AppState.pub) return diag('Google Client ID belum diisi di server', 'Isi <code>INITIAL_GOOGLE_CLIENT_ID</code> di Kode.gs, jalankan fungsi <code>setGoogleClientId()</code>, lalu klik Coba lagi.');
+      box.innerHTML = '<p class="text-sm text-muted text-center"><span class="spinner-inline"></span> Memuat Sign in with Google…</p>';
+      clearTimeout(Login._t); Login._t = setTimeout(() => { if (!(AppState.pub && AppState.pub.googleClientId) && !Public.lastError) diag('Server lambat merespons', 'Belum ada jawaban dari Apps Script setelah 20 detik.'); }, 20000);
+      return;
+    }
+    if (!window.google || !google.accounts || !google.accounts.id) {
+      Login._gsiWait = (Login._gsiWait || 0) + 1;
+      if (Login._gsiWait > 40) return diag('Skrip Google tidak termuat', 'Matikan ad-blocker/ekstensi privasi untuk situs ini, lalu muat ulang halaman.');
+      setTimeout(() => Login.initGoogle(), 400); return;
+    }
     if (box.dataset.ready === cid) return;
     google.accounts.id.initialize({ client_id: cid, callback: Login.onGoogle, auto_select: false, cancel_on_tap_outside: true, ux_mode: 'popup' });
     box.innerHTML = '';
     google.accounts.id.renderButton(box, { theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'filled_black' : 'outline', size: 'large', text: 'signin_with', shape: 'pill', width: 300, locale: 'id' });
     box.dataset.ready = cid;
+  },
+  retryGoogle() {
+    const box = document.getElementById('gsiButton'); if (box) { box.dataset.ready = ''; box.style.flexDirection = ''; }
+    Store.del('pub'); Public.lastError = ''; Login._gsiWait = 0; AppState.pub = null;
+    Login.initGoogle(); Public.prefetch();
   },
   async onGoogle(resp) {
     const box = document.getElementById('gsiStatus');
