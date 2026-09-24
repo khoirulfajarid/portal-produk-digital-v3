@@ -11,7 +11,8 @@ const ADMIN_MENU = [
     { id: 'keys', icon: 'key-round', label: 'Kode Akses' }] },
   { group: 'Member & Transaksi', items: [
     { id: 'orders', icon: 'receipt', label: 'Verifikasi Pesanan', badge: true },
-    { id: 'crm', icon: 'contact', label: 'CRM Member' },
+    { id: 'custom', icon: 'wand-sparkles', label: 'Aplikasi Custom', badge: true },
+    { id: 'crm', icon: 'contact', label: 'CRM Member', badge: true },
     { id: 'access', icon: 'user-plus', label: 'Pemberian Akses' }] },
   { group: 'Konten', items: [
     { id: 'showcase', icon: 'trophy', label: 'Pameran Karya' },
@@ -67,7 +68,7 @@ const Admin = {
     if (res.success) {
       AppState.a[action] = res.data;
       Store.set(this.key(action), { t: Date.now(), data: res.data });
-      if (action === 'dashboard') setNavBadge('orders', res.data.kpi.pending);
+      if (action === 'dashboard') setDashBadges(res.data.kpi);
       if (action === 'ordersAdmin') setNavBadge('orders', res.data.kpi.pending);
       const r = ADMIN_RENDER[action];
       if (r) r(res.data);
@@ -86,6 +87,8 @@ const Admin = {
 /** Peta aksi → fungsi render (diisi oleh tiap modul halaman). */
 const ADMIN_RENDER = {};
 
+function shortText(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+
 function renderSidebar() {
   const menu = document.getElementById('sidebarMenu');
   if (!menu) return;
@@ -97,8 +100,14 @@ function renderSidebar() {
     '<i data-lucide="' + m.icon + '" class="w-[18px] h-[18px]"></i><span class="flex-1 text-left">' + m.label + '</span>' +
     (m.badge ? '<span class="nav-badge" data-badge="' + m.id + '" hidden>0</span>' : '') + '</button></li>').join('')).join('');
   const d = Admin.cached('dashboard');
-  if (d) setNavBadge('orders', d.kpi.pending);
+  if (d) setDashBadges(d.kpi);
   refreshIcons();
+}
+
+function setDashBadges(k) {
+  setNavBadge('orders', k.pending);
+  setNavBadge('custom', k.customNew || 0);
+  setNavBadge('crm', k.pendingReg || 0);
 }
 
 function renderSidebarBrand() {
@@ -119,6 +128,7 @@ function kpi(label, value, icon, tone, sub) {
     (sub ? '<p class="text-xs text-muted mt-2">' + esc(sub) + '</p>' : '') + '</div>' +
     '<div class="stat-icon"' + (tone ? ' style="background:' + tone + '1f;color:' + tone + '"' : '') + '><i data-lucide="' + icon + '" class="w-5 h-5"></i></div></div>';
 }
+function kpiLink(html, js) { return '<button type="button" class="kpi-link" onclick="' + js + '">' + html + '</button>'; }
 function statusBadge(s) {
   const m = { Active: 'badge-success', Published: 'badge-success', Approved: 'badge-success', Done: 'badge-success', Sent: 'badge-success', Member: 'badge-success',
     Draft: 'badge-document', Inactive: 'badge-document', Paused: 'badge-document', Cancelled: 'badge-document',
@@ -131,7 +141,12 @@ function bar(pct, tone) {
   const c = tone || (pct > 85 ? 'var(--error)' : pct > 65 ? 'var(--warning)' : 'var(--accent)');
   return '<div class="meter"><span style="width:' + pct.toFixed(1) + '%;background:' + c + '"></span></div>';
 }
-function adminRoute(id, def) { registerPage('admin-' + id, Object.assign({ layout: 'admin', auth: 'admin' }, def)); }
+/** Halaman admin: tampil setelah lib admin (jQuery/DataTables/Chart.js) termuat — dimuat sekali saja. */
+function adminRoute(id, def) {
+  const show = def.show;
+  if (show) def.show = (el, p) => { const r = AdminLibs.ready(); if (window.jQuery && jQuery.fn.dataTable && window.Chart) show(el, p); else r.then(() => { if (AppState.currentPage === 'admin-' + id) show(el, p); }); };
+  registerPage('admin-' + id, Object.assign({ layout: 'admin', auth: 'admin' }, def));
+}
 
 
 // ════════════════════════════════════════════════════════════
@@ -141,7 +156,7 @@ adminRoute('dashboard', {
   title: 'Dashboard',
   template: () => '<div class="page-wrap-fluid">' + adminHead('Dashboard Analisis', 'Performa platform, kuota harian, dan aktivitas terbaru.',
       '<button class="btn-ghost !w-auto" onclick="Admin.fetch(\'dashboard\');loadSystemStatus(true)"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
-    '<div id="dashKpi" class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">' + '<div class="skeleton h-28"></div>'.repeat(8) + '</div>' +
+    '<div id="dashKpi" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">' + '<div class="skeleton h-28"></div>'.repeat(10) + '</div>' +
     '<div id="sysBox" class="mb-6"></div>' +
     '<div class="grid xl:grid-cols-3 gap-6 mb-6">' +
       '<div class="app-card rounded-2xl p-6 xl:col-span-2"><h3 class="font-semibold text-main mb-4">Tren 14 Hari</h3><div class="h-[280px]"><canvas id="chTrend"></canvas></div></div>' +
@@ -177,7 +192,9 @@ ADMIN_RENDER.dashboard = function (d) {
     kpi('Produk Aktif', k.products, 'package', cssVar('--accent')) +
     kpi('Perlu Verifikasi', k.pending, 'clock', cssVar('--warning')) +
     kpi('Pendapatan', fmtMoney(k.revenue).replace('Gratis', 'Rp 0'), 'wallet', cssVar('--success')) +
-    kpi('Akses 14 Hari', d.trend.access.reduce((a, b) => a + b, 0), 'trending-up', cssVar('--indigo'));
+    kpi('Akses 14 Hari', d.trend.access.reduce((a, b) => a + b, 0), 'trending-up', cssVar('--indigo')) +
+    kpiLink(kpi('Pendaftar Member', k.pendingReg || 0, 'user-round-plus', cssVar('--warning'), 'menunggu persetujuan'), "CF.tab='pending';go('admin/crm')") +
+    kpiLink(kpi('Aplikasi Custom', k.customNew || 0, 'wand-sparkles', cssVar('--accent'), 'perlu tindakan Anda'), "go('admin/custom')");
   document.getElementById('dashInsights').innerHTML = d.insights.map(t => '<li>' + esc(t) + '</li>').join('');
   document.getElementById('dashPending').innerHTML = d.pendingList.length ? d.pendingList.map(o =>
     '<div class="log-row"><div class="log-dot" style="background:var(--warning)"></div><div class="min-w-0 flex-1"><p class="text-sm font-medium text-main truncate">' + esc(o.product) + '</p>' +
@@ -294,7 +311,7 @@ adminRoute('products', {
       '<div class="min-w-[180px]"><label class="form-label">Kategori</label><select id="pfCatF" class="form-input" onchange="PF.cat=this.value;ADMIN_RENDER.productsAdmin(AppState.a.productsAdmin)"><option value="all">Semua</option><option>Kelas</option><option>Aplikasi</option><option value="Document">Dokumen</option><option>AI Link</option></select></div>' +
       '<div class="min-w-[160px]"><label class="form-label">Status</label><select id="pfStF" class="form-input" onchange="PF.status=this.value;ADMIN_RENDER.productsAdmin(AppState.a.productsAdmin)"><option value="all">Semua</option><option>Active</option><option>Draft</option></select></div>' +
       '<p id="pfCount" class="text-sm text-muted ml-auto"></p></div>' +
-    '<div class="app-card rounded-2xl p-5 overflow-x-auto"><table id="tblProducts" class="display w-full"><thead><tr><th>Produk</th><th>Kategori</th><th>Harga</th><th>Isi</th><th>Pemilik</th><th>Publik</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table></div></div>',
+    '<div class="app-card rounded-2xl p-5 overflow-x-auto"><table id="tblProducts" class="display w-full"><thead><tr><th>Produk</th><th>Kategori</th><th>Harga</th><th>Isi & Pemilik</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table></div></div>',
   show: () => Admin.load('productsAdmin')
 });
 
@@ -304,14 +321,15 @@ ADMIN_RENDER.productsAdmin = function (list) {
   document.getElementById('pfCount').textContent = rows.length + ' dari ' + list.length + ' produk';
   buildTable('tblProducts', {
     data: rows, columns: [
-      { data: null, render: p => '<div class="flex items-center gap-3 min-w-[240px]"><div class="w-16 h-10 rounded-lg overflow-hidden flex-none bg-surface-2">' + img(p.thumbnail, '', 'style="width:100%;height:100%;object-fit:cover"', 'IMG') + '</div>' +
-        '<div class="min-w-0"><p class="font-semibold text-main truncate">' + esc(p.Title) + '</p><p class="text-xs text-muted truncate">' + esc(p.Tagline || p.Description) + '</p></div></div>' },
+      { data: null, render: (p, t) => t !== 'display' ? p.Title + ' ' + (p.Tagline || p.Description) :
+        '<div class="prod-cell"><div class="prod-thumb">' + img(p.thumbnail, '', 'style="width:100%;height:100%;object-fit:cover"', 'IMG') + '</div>' +
+        '<div class="min-w-0"><p class="font-semibold text-main line-clamp-2" title="' + esc(p.Title) + '">' + esc(p.Title) + '</p>' +
+        '<p class="text-xs text-muted line-clamp-1" title="' + esc(p.Tagline || p.Description) + '">' + esc(shortText(p.Tagline || p.Description, 70)) + '</p></div></div>' },
       { data: 'Category', render: c => '<span class="badge ' + badgeClassFor(c) + '">' + esc(catLabel(c)) + '</span>' },
       { data: 'Price', render: (v, t) => t === 'display' ? esc(fmtMoney(v)) : v },
-      { data: null, render: p => p.Category === 'Kelas' ? p.episodeCount + ' ep · ' + p.resourceCount + ' materi' : p.Category === 'Aplikasi' ? (p.slides.length + p.previewVideos.length) + ' preview · ' + p.resourceCount + ' materi' : '—' },
-      { data: 'owners' },
-      { data: 'isPublic', render: v => v ? '<i data-lucide="globe" class="w-4 h-4 text-accent"></i>' : '<span class="text-muted">—</span>' },
-      { data: 'Status', render: s => statusBadge(s) },
+      { data: null, render: (p, t) => t !== 'display' ? Number(p.owners) || 0 : '<div class="prod-meta">' + (p.Category === 'Kelas' ? p.episodeCount + ' ep · ' + p.resourceCount + ' materi' : p.Category === 'Aplikasi' ? (p.slides.length + p.previewVideos.length) + ' preview · ' + p.resourceCount + ' materi' : '—') +
+        '<br><b>' + (Number(p.owners) || 0) + '</b> pemilik</div>' },
+      { data: null, render: (p, t) => t !== 'display' ? p.Status : '<div class="flex items-center gap-1.5">' + statusBadge(p.Status) + (p.isPublic ? '<i data-lucide="globe" class="w-4 h-4 text-accent" title="Tampil di halaman publik"></i>' : '') + '</div>' },
       { data: null, orderable: false, render: p => '<div class="flex gap-1.5"><button class="btn-icon" title="Ubah" onclick="openProductForm(' + jsArg(p.Product_ID) + ')"><i data-lucide="pencil" class="w-4 h-4"></i></button>' +
         (p.Status === 'Active' ? '<button class="btn-icon" title="Arsipkan" onclick="setProductStatus(' + jsArg(p.Product_ID) + ',\'Draft\')"><i data-lucide="archive" class="w-4 h-4"></i></button>'
                                : '<button class="btn-icon" title="Aktifkan" onclick="setProductStatus(' + jsArg(p.Product_ID) + ',\'Active\')"><i data-lucide="archive-restore" class="w-4 h-4"></i></button>') + '</div>' }

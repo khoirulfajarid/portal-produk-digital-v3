@@ -10,6 +10,7 @@
 const MEMBER_MENU = [
   { id: 'home', icon: 'layout-grid', label: 'Beranda' },
   { id: 'library', icon: 'graduation-cap', label: 'Kelas Saya' },
+  { id: 'custom', icon: 'wand-sparkles', label: 'Aplikasi Custom' },
   { id: 'orders', icon: 'receipt', label: 'Pesanan' },
   { id: 'helpdesk', icon: 'life-buoy', label: 'Helpdesk' }
 ];
@@ -27,8 +28,22 @@ const Member = {
       if (!fromCache) Member._lastFetch = Date.now();
       Member.renderMounted();
       if (!fromCache) Member.showAnnouncements();
-    }).finally(() => { this._loading = null; });
+    }, { onError: res => Member.renderError(res.message) }).finally(() => { this._loading = null; });
     return this._loading;
+  },
+
+  /** Belum ada data sama sekali & server gagal → tampilkan tombol Coba lagi (bukan skeleton selamanya). */
+  renderError(msg) {
+    if (AppState.m) return;
+    ['homeRoot', 'libraryRoot', 'ordersRoot', 'helpRoot', 'customRoot'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = errorState(msg, 'Member.retry()');
+    });
+    refreshIcons();
+  },
+  retry() {
+    ['homeRoot', 'libraryRoot', 'ordersRoot', 'helpRoot', 'customRoot'].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = skeletonRows(4); });
+    this.refresh();
   },
 
   /** Render ulang halaman member yang sudah pernah dibuka. */
@@ -38,6 +53,8 @@ const Member = {
     if (document.getElementById('libraryRoot')) renderLibrary();
     if (document.getElementById('ordersRoot')) renderOrders();
     if (document.getElementById('helpRoot')) renderHelpdesk();
+    if (document.getElementById('customRoot') && typeof renderCustomList === 'function') renderCustomList();
+    if (document.getElementById('customDetailRoot') && typeof renderCustomDetail === 'function') renderCustomDetail();
   },
 
   /** Segarkan diam-diam bila data sudah > 60 detik (dipanggil saat pindah halaman). */

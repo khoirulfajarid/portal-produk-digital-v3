@@ -8,35 +8,28 @@
   <meta name="theme-color" content="#0D9488">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230D9488'/%3E%3Cpath d='M20 22h14a10 10 0 010 20H20z' fill='%23fff'/%3E%3C/svg%3E">
 
+  <!-- Koneksi dini ke server Apps Script & CDN (mempercepat request pertama di HP) -->
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://accounts.google.com">
+
   <!-- Inter — satu-satunya typeface (DESIGN.md) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Tailwind CSS (CDN Play) — sama seperti v2.0 -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: ['class', '[data-theme="dark"]'],
-      theme: { extend: {
-        fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] },
-        borderRadius: { '2xl': '1rem', '3xl': '1.5rem' }
-      } }
-    };
-  </script>
-
-  <script src="https://cdn.jsdelivr.net/npm/lucide@0.446.0/dist/umd/lucide.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-  <link href="https://cdn.jsdelivr.net/npm/datatables.net-dt@1.13.8/css/jquery.dataTables.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/datatables.net@1.13.8/js/jquery.dataTables.min.js"></script>
   <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js"></script>
-  <!-- Google Identity Services — Sign in with Google (Superadmin) -->
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/app.css">
+  <!-- Tailwind v3 hasil build (pengganti CDN Play: tanpa kompilasi di browser → jauh lebih ringan di HP) -->
+  <link rel="stylesheet" href="css/tw.css">
+
+  <!-- Skrip: defer = tidak memblokir tampilan. jQuery/DataTables/Chart.js dimuat otomatis hanya untuk Superadmin -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.446.0/dist/umd/lucide.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js" defer></script>
+  <!-- Google Identity Services — Sign in with Google (Superadmin) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 
 <body class="antialiased layout-public">
@@ -170,13 +163,15 @@
   <div id="toastStack" class="toast-stack"></div>
 
   <!-- Urutan penting: config → core → modul -->
-  <script src="js/config.js"></script>
-  <script src="js/core.js"></script>
-  <script src="js/public.js"></script>
-  <script src="js/member.js"></script>
-  <script src="js/admin.js"></script>
-  <script src="js/admin-people.js"></script>
-  <script src="js/admin-content.js"></script>
-  <script src="js/admin-ops.js"></script>
+  <script src="js/config.js" defer></script>
+  <script src="js/core.js" defer></script>
+  <script src="js/public.js" defer></script>
+  <script src="js/member.js" defer></script>
+  <script src="js/custom.js" defer></script>
+  <script src="js/admin.js" defer></script>
+  <script src="js/admin-people.js" defer></script>
+  <script src="js/admin-content.js" defer></script>
+  <script src="js/admin-ops.js" defer></script>
+  <script src="js/admin-custom.js" defer></script>
 </body>
 </html>

@@ -66,6 +66,7 @@ function renderExplore() {
           '<div class="flex flex-wrap gap-3 mt-7">' +
             (apps.length ? '<button class="btn-primary !w-auto" onclick="scrollToId(\'secApps\')"><i data-lucide="app-window" class="w-4 h-4"></i> Lihat Aplikasi</button>' : '') +
             ((boots.length || classes.length) ? '<button class="btn-ghost !w-auto" onclick="scrollToId(\'secClass\')"><i data-lucide="graduation-cap" class="w-4 h-4"></i> Kelas & Bootcamp</button>' : '') +
+            (s.customEnabled ? '<button class="btn-ghost !w-auto" onclick="scrollToId(\'secCustom\')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i> Aplikasi Custom</button>' : '') +
             '<button class="btn-ghost !w-auto" onclick="askAdmin(\'WhatsApp\', \'Info umum\')"><i data-lucide="message-circle" class="w-4 h-4"></i> Tanya Admin</button>' +
           '</div>' +
         '</div>' +
@@ -87,6 +88,17 @@ function renderExplore() {
       '<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">' + shows.map(showcaseCard).join('') + '</div></section>'
     : '';
 
+  const customHtml = s.customEnabled
+    ? '<section id="secCustom" class="page-wrap !pb-4"><div class="custom-hero">' +
+        '<div class="min-w-0"><span class="hero-kicker"><i data-lucide="wand-sparkles" class="w-4 h-4"></i> Jasa Pembuatan Aplikasi</span>' +
+        '<h2 class="text-2xl font-bold tracking-tight text-main mt-3">Butuh Aplikasi Custom Berbasis Apps Script?</h2>' +
+        '<p class="text-sm text-muted mt-2 max-w-2xl">' + esc(s.customIntro || '') + '</p>' +
+        '<div class="flex flex-wrap gap-x-5 gap-y-1 mt-3 text-xs text-muted"><span>✓ Harga eksklusif / hemat / ajukan sendiri</span><span>✓ Estimasi jadwal jelas</span><span>✓ Source code .zip + video tutorial</span></div></div>' +
+        '<div class="flex flex-wrap gap-2"><button class="btn-primary !w-auto" onclick="startCustomOrder()"><i data-lucide="wand-sparkles" class="w-4 h-4"></i> Ajukan Aplikasi</button>' +
+        '<button class="btn-ghost !w-auto" onclick="openRegisterDialog()"><i data-lucide="user-plus" class="w-4 h-4"></i> Daftar Member</button></div>' +
+      '</div></section>'
+    : '';
+
   const cta =
     '<section class="page-wrap">' +
       '<div class="cta-band">' +
@@ -95,6 +107,7 @@ function renderExplore() {
         '<div class="flex flex-wrap gap-3">' +
           '<button class="btn-primary !w-auto" onclick="openRedeemDialog()"><i data-lucide="key-round" class="w-4 h-4"></i> Redeem Kode</button>' +
           '<button class="btn-ghost !w-auto" onclick="go(\'login\')"><i data-lucide="log-in" class="w-4 h-4"></i> Masuk Portal</button>' +
+          '<button class="btn-ghost !w-auto" onclick="openRegisterDialog()"><i data-lucide="user-plus" class="w-4 h-4"></i> Daftar Member</button>' +
         '</div>' +
       '</div>' +
       (s.testimoniUrl ? '<div class="testi-band mt-6"><div class="flex items-center gap-3 min-w-0"><div class="testi-icon"><i data-lucide="star" class="w-5 h-5"></i></div>' +
@@ -110,10 +123,10 @@ function renderExplore() {
       '<p class="text-center text-xs text-muted mt-10">© ' + new Date().getFullYear() + ' ' + esc(s.appName || '') + '</p>' +
     '</section>';
 
-  const empty = (!apps.length && !classes.length && !boots.length && !shows.length)
+  const empty = (!apps.length && !classes.length && !boots.length && !shows.length && !s.customEnabled)
     ? '<div class="page-wrap">' + emptyState('package-open', 'Belum ada yang dipamerkan', 'Admin belum menambahkan aplikasi, kelas, atau karya member.') + '</div>' : '';
 
-  root.innerHTML = hero + appsHtml + classHtml + showHtml + empty + cta;
+  root.innerHTML = hero + appsHtml + classHtml + customHtml + showHtml + empty + cta;
   refreshIcons();
 }
 
@@ -341,11 +354,20 @@ const Login = {
     const btn = e.submitter || document.querySelector('#formMember button[type=submit]');
     const res = await withBusy(btn, 'Memeriksa…', () => api('loginMember', { email: email }));
     if (!res.success) {
-      const notReg = res.data && res.data.code === 'NOT_REGISTERED';
-      Swal.fire({
-        icon: notReg ? 'warning' : 'error', title: notReg ? 'Email tidak terdaftar' : 'Gagal masuk', text: res.message,
-        showCancelButton: notReg, confirmButtonText: notReg ? 'Redeem Kode Akses' : 'OK', cancelButtonText: 'Coba email lain'
-      }).then(r => { if (notReg && r.isConfirmed) openRedeemDialog(email); });
+      const code = res.data && res.data.code;
+      if (code === 'NOT_REGISTERED') {
+        Swal.fire({
+          icon: 'warning', title: 'Email tidak terdaftar', text: res.message, showDenyButton: true, showCancelButton: true,
+          confirmButtonText: 'Redeem Kode Akses', denyButtonText: 'Daftar Member', cancelButtonText: 'Coba email lain'
+        }).then(r => { if (r.isConfirmed) openRedeemDialog(email); else if (r.isDenied) openRegisterDialog(email); });
+      } else if (code === 'PENDING') {
+        Swal.fire({ icon: 'info', title: 'Menunggu persetujuan', text: res.message, confirmButtonText: 'OK', showDenyButton: true, denyButtonText: 'Tanya Admin' })
+          .then(r => { if (r.isDenied) askAdmin('WhatsApp', 'Status pendaftaran ' + email); });
+      } else if (code === 'REJECTED') {
+        Swal.fire({ icon: 'warning', title: 'Pendaftaran belum disetujui', text: res.message, showDenyButton: true, showCancelButton: true,
+          confirmButtonText: 'Ajukan Ulang', denyButtonText: 'Tanya Admin', cancelButtonText: 'Tutup' })
+          .then(r => { if (r.isConfirmed) openRegisterDialog(email, 'Perbaiki data Anda lalu kirim ulang pendaftaran.'); else if (r.isDenied) askAdmin('WhatsApp', 'Status pendaftaran ' + email); });
+      } else Swal.fire({ icon: 'error', title: 'Gagal masuk', text: res.message });
       return;
     }
     this.pushHistory(email);
@@ -417,6 +439,7 @@ registerPage('login', {
             '<div id="emailHistory" class="mt-3"></div></div>' +
             '<button type="submit" class="btn-primary w-full"><i data-lucide="log-in" class="w-4 h-4"></i> Masuk sebagai Member</button>' +
             '<button type="button" onclick="openRedeemDialog()" class="btn-ghost w-full"><i data-lucide="key-round" class="w-4 h-4"></i> Punya Kode Akses? Redeem di sini</button>' +
+            '<p class="text-center text-xs text-muted">Belum punya akun? <button type="button" class="text-accent font-semibold" onclick="openRegisterDialog()">Daftar sebagai member</button></p>' +
           '</form>' +
           '<div id="formAdmin" class="px-8 py-6 space-y-4" hidden>' +
             '<div class="text-center"><div class="w-12 h-12 mx-auto rounded-2xl grid place-items-center" style="background:var(--accent-soft);color:var(--accent)"><i data-lucide="shield-check" class="w-6 h-6"></i></div>' +
@@ -440,7 +463,9 @@ function onMemberLogin(d) {
   if (d.profile) {
     AppState.m = AppState.m || Store.get(userKey('boot'), { data: null }).data;
   }
-  go('home');
+  const next = Store.get('afterLogin', '');
+  if (next) Store.del('afterLogin');
+  go(next && Pages[next] ? next : 'home');
   Member.refresh();
 }
 

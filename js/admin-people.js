@@ -72,9 +72,9 @@ adminRoute('crm', {
   template: () => '<div class="page-wrap-fluid">' + adminHead('CRM Member & Non-Member', 'Member = akses portal via redeem/beli. Non-Member = pengunjung Open Access yang bertanya lewat WhatsApp/Email.',
       '<button class="btn-ghost !w-auto" onclick="exportCrm()"><i data-lucide="download" class="w-4 h-4"></i> Export CSV</button>' +
       '<button class="btn-primary !w-auto" onclick="openMemberForm()"><i data-lucide="user-plus" class="w-4 h-4"></i> Tambah Member</button>') +
-    '<div id="crmKpi" class="grid grid-cols-2 xl:grid-cols-5 gap-4 mb-6"></div>' +
+    '<div id="crmKpi" class="grid grid-cols-2 xl:grid-cols-6 gap-4 mb-6"></div>' +
     '<div class="app-card rounded-2xl p-5"><div class="flex flex-wrap items-center gap-2 mb-4">' +
-      '<div class="seg"><button data-tab="members" onclick="CF.tab=\'members\';ADMIN_RENDER.crm(AppState.a.crm)">Member</button><button data-tab="leads" onclick="CF.tab=\'leads\';ADMIN_RENDER.crm(AppState.a.crm)">Non-Member</button></div>' +
+      '<div class="seg"><button data-tab="members" onclick="CF.tab=\'members\';ADMIN_RENDER.crm(AppState.a.crm)">Member</button><button data-tab="pending" onclick="CF.tab=\'pending\';ADMIN_RENDER.crm(AppState.a.crm)">Pendaftar <span id="crmPendBadge" class="nav-badge" hidden>0</span></button><button data-tab="leads" onclick="CF.tab=\'leads\';ADMIN_RENDER.crm(AppState.a.crm)">Non-Member</button></div>' +
       '<div id="crmFilters" class="flex flex-wrap gap-2 ml-auto"></div></div>' +
       '<div id="crmTableBox" class="overflow-x-auto"></div></div></div>',
   show: () => Admin.load('crm')
@@ -82,12 +82,17 @@ adminRoute('crm', {
 
 ADMIN_RENDER.crm = function (d) {
   if (!document.getElementById('crmKpi') || !d) return;
-  const m = d.members, l = d.leads;
+  const regs = d.members.filter(x => x.status === 'Pending' || x.status === 'Rejected');
+  const m = d.members.filter(x => x.status !== 'Pending' && x.status !== 'Rejected'), l = d.leads;
+  const pend = regs.filter(x => x.status === 'Pending').length;
+  setNavBadge('crm', pend);
   const complete = m.filter(x => x.complete).length, blocked = m.filter(x => x.status === 'Blocked').length;
   document.getElementById('crmKpi').innerHTML =
     kpi('Total Member', m.length, 'users', cssVar('--accent')) + kpi('Data Lengkap', complete, 'user-check', cssVar('--success'), (m.length ? Math.round(complete / m.length * 100) : 0) + '%') +
     kpi('Belum Lengkap', m.length - complete, 'user-x', cssVar('--warning')) + kpi('Diblokir', blocked, 'ban', cssVar('--error')) +
+    kpi('Pendaftar Baru', pend, 'user-round-plus', cssVar('--warning'), 'menunggu persetujuan') +
     kpi('Non-Member', l.length, 'user-search', cssVar('--indigo'), l.filter(x => x.status === 'Baru').length + ' baru');
+  const pb = document.getElementById('crmPendBadge'); if (pb) { pb.textContent = pend; pb.hidden = !pend; }
   document.querySelectorAll('.seg [data-tab]').forEach(b => b.classList.toggle('is-active', b.dataset.tab === CF.tab));
   const sel = (id, val, opts, onchg) => '<select class="form-input !py-2 !w-auto" onchange="' + onchg + '">' + opts.map(o => '<option value="' + esc(o[0]) + '"' + (val === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select>';
   const box = document.getElementById('crmTableBox');
@@ -115,6 +120,25 @@ ADMIN_RENDER.crm = function (d) {
           '<button class="btn-icon" title="' + (x.status === 'Blocked' ? 'Aktifkan' : 'Blokir') + '" onclick="toggleMember(' + jsArg(x.id) + ')"><i data-lucide="' + (x.status === 'Blocked' ? 'unlock' : 'ban') + '" class="w-4 h-4"></i></button></div>' }
       ]
     });
+  } else if (CF.tab === 'pending') {
+    CF.regStatus = CF.regStatus || 'Pending';
+    document.getElementById('crmFilters').innerHTML = sel('rs', CF.regStatus, [['Pending', 'Menunggu persetujuan'], ['Rejected', 'Ditolak'], ['all', 'Semua']], 'CF.regStatus=this.value;ADMIN_RENDER.crm(AppState.a.crm)');
+    const rows = regs.filter(x => CF.regStatus === 'all' || x.status === CF.regStatus);
+    box.innerHTML = '<table id="tblRegs" class="display w-full"><thead><tr><th>Pendaftar</th><th>WhatsApp</th><th>Profesi</th><th>Keperluan</th><th>Mendaftar</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
+    buildTable('tblRegs', {
+      data: rows, columns: [
+        { data: null, render: x => '<div class="cell-user"><div class="cell-avatar">' + esc(initial(x.fullName || x.email)) + '</div><div class="min-w-0"><p class="font-medium text-main">' + esc(x.fullName || x.nickname || '—') + '</p><p class="text-xs text-muted">' + esc(x.email) + '</p></div></div>' },
+        { data: 'whatsapp', render: w => w ? '<button class="mono text-sm text-accent" onclick="openLink(waLink(' + jsArg(w) + '))">' + esc(w) + '</button>' : '—' },
+        { data: 'profession', render: v => esc(v || '—') },
+        { data: 'regNote', render: v => '<span class="text-xs text-muted" title="' + esc(v) + '">' + esc(shortText(v, 60) || '—') + '</span>' },
+        { data: 'createdAt', render: (v, t) => t === 'display' ? timeAgo(v) : v },
+        { data: 'status', render: s => s === 'Pending' ? '<span class="badge badge-warning"><span class="dot"></span>Menunggu</span>' : statusBadge(s) },
+        { data: null, orderable: false, render: x => '<div class="flex gap-1.5">' +
+          '<button class="btn-primary !w-auto !py-1.5 !px-3 !text-xs" onclick="approveReg(' + jsArg(x.id) + ',true)"><i data-lucide="check" class="w-3.5 h-3.5"></i> Setujui</button>' +
+          (x.status === 'Pending' ? '<button class="btn-ghost !w-auto !py-1.5 !px-3 !text-xs" onclick="approveReg(' + jsArg(x.id) + ',false)"><i data-lucide="x" class="w-3.5 h-3.5"></i> Tolak</button>' : '') +
+          '<button class="btn-icon" title="Chat WA" onclick="openLink(waLink(' + jsArg(x.whatsapp) + ',' + jsArg('Halo ' + (x.fullName || '') + ', ') + '))"><i data-lucide="message-circle" class="w-4 h-4"></i></button></div>' }
+      ]
+    });
   } else {
     document.getElementById('crmFilters').innerHTML = sel('ls', CF.leadStatus, [['all', 'Semua status'], ['Baru', 'Baru'], ['Dihubungi', 'Dihubungi'], ['Tertarik', 'Tertarik'], ['Member', 'Jadi Member'], ['Tidak Tertarik', 'Tidak Tertarik']], 'CF.leadStatus=this.value;ADMIN_RENDER.crm(AppState.a.crm)');
     const rows = l.filter(x => CF.leadStatus === 'all' || x.status === CF.leadStatus);
@@ -138,11 +162,31 @@ ADMIN_RENDER.crm = function (d) {
   refreshIcons();
 };
 
+/** Setujui / tolak pendaftar member (notifikasi regApproved / regRejected). */
+async function approveReg(id, approve) {
+  const d = AppState.a.crm, u = d && d.members.filter(x => x.id === id)[0];
+  if (!u) return;
+  const r = await Swal.fire({
+    title: approve ? 'Setujui pendaftar?' : 'Tolak pendaftar?', icon: approve ? 'question' : 'warning', showCancelButton: true,
+    confirmButtonText: approve ? 'Ya, setujui' : 'Tolak', cancelButtonText: 'Batal',
+    html: '<p class="text-sm"><b>' + esc(u.fullName || u.email) + '</b><br>' + esc(u.email) + ' · ' + esc(u.whatsapp) + '<br>' + esc(u.profession || '') + '</p>',
+    input: approve ? undefined : 'text', inputPlaceholder: 'Alasan (dikirim ke pendaftar, opsional)'
+  });
+  if (!r.isConfirmed) return;
+  u.status = approve ? 'Active' : 'Rejected'; ADMIN_RENDER.crm(d);           // optimistic
+  const res = await api('approveRegistration', { id: id, approve: approve, reason: approve ? '' : (r.value || '') });
+  if (!toastRes(res)) u.status = 'Pending';
+  Admin.fetch('crm'); Admin.fetch('dashboard');
+}
+
 function exportCrm() {
   const d = AppState.a.crm; if (!d) return;
-  if (CF.tab === 'members') downloadCsv('member_' + new Date().toISOString().slice(0, 10) + '.csv',
+  if (CF.tab === 'pending') downloadCsv('pendaftar_' + new Date().toISOString().slice(0, 10) + '.csv',
+    [['Nama Lengkap', 'Email', 'WhatsApp', 'Profesi', 'Keperluan', 'Status', 'Mendaftar']].concat(
+      d.members.filter(x => x.status === 'Pending' || x.status === 'Rejected').map(x => [x.fullName, x.email, x.whatsapp, x.profession, x.regNote, x.status, fmtDateTime(x.createdAt)])));
+  else if (CF.tab === 'members') downloadCsv('member_' + new Date().toISOString().slice(0, 10) + '.csv',
     [['Email', 'Nama', 'WhatsApp', 'Status', 'Lengkap', 'Sumber', 'Terdaftar', 'Login Terakhir', 'Produk']].concat(
-      d.members.map(x => [x.email, x.nickname, x.whatsapp, x.status, x.complete ? 'Ya' : 'Tidak', x.source, fmtDate(x.createdAt), fmtDateTime(x.lastLogin), x.products.join('; ')])));
+      d.members.filter(x => x.status !== 'Pending' && x.status !== 'Rejected').map(x => [x.email, x.nickname, x.whatsapp, x.status, x.complete ? 'Ya' : 'Tidak', x.source, fmtDate(x.createdAt), fmtDateTime(x.lastLogin), x.products.join('; ')])));
   else downloadCsv('non_member_' + new Date().toISOString().slice(0, 10) + '.csv',
     [['Nama', 'WhatsApp', 'Email', 'Minat', 'Via', 'Status', 'Catatan', 'Masuk']].concat(d.leads.map(x => [x.name, x.whatsapp, x.email, x.interest, x.channel, x.status, x.note, fmtDateTime(x.createdAt)])));
 }
@@ -240,7 +284,7 @@ ADMIN_RENDER.crm = function (d) { _crmRenderBase(d); if (document.getElementById
 function renderGrantPool() {
   const d = AppState.a.crm; const box = document.getElementById('gaPool');
   if (!d || !box) return;
-  const list = d.members.filter(m => m.status !== 'Blocked' && GA.dropped.indexOf(m.email) === -1 && (!GA.q || (m.email + ' ' + m.nickname).toLowerCase().indexOf(GA.q) > -1)).slice(0, 300);
+  const list = d.members.filter(m => (m.status === 'Active' || !m.status) && GA.dropped.indexOf(m.email) === -1 && (!GA.q || (m.email + ' ' + m.nickname).toLowerCase().indexOf(GA.q) > -1)).slice(0, 300);
   box.innerHTML = list.map(m => '<span class="cust-chip' + (GA.selected.indexOf(m.email) > -1 ? ' is-selected' : '') + '" draggable="true" data-email="' + esc(m.email) + '">' +
     '<span class="chip-avatar">' + esc(initial(m.nickname || m.email)) + '</span>' + esc(m.nickname ? m.nickname + ' · ' + m.email : m.email) + '</span>').join('') || '<p class="text-sm text-muted">Tidak ada member.</p>';
   box.querySelectorAll('.cust-chip').forEach(ch => {

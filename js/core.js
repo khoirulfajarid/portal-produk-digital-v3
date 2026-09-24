@@ -48,30 +48,102 @@ function userKey(k) { return 'u:' + (AppState.email || 'anon') + ':' + k; }
 // ════════════════════════════════════════════════════════════
 // 3. API — fetch POST ke GAS (text/plain → tanpa CORS preflight)
 // ════════════════════════════════════════════════════════════
+/** Aksi baca (aman diulang otomatis bila jaringan HP putus-sambung). Aksi tulis TIDAK diulang. */
+const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin)$/;
+let _slowToastAt = 0;
+
+async function apiOnce(action, data, opts) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), opts.timeout);
+  try {
+    const res = await fetch(GAS_URL, {
+      method: 'POST', redirect: 'follow', signal: ctrl.signal, cache: 'no-store',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: action, token: AppState.token || '', data: data || {} })
+    });
+    const text = await res.text();
+    try { return JSON.parse(text); }
+    catch (e) {
+      // GAS kadang membalas halaman "server sibuk" sesaat → boleh dicoba ulang
+      return { success: false, network: true, retryable: res.status >= 500 || res.status === 429,
+        message: 'Server membalas HTTP ' + res.status + ' berupa halaman, bukan data JSON. Biasanya URL /exec salah, deployment sudah dihapus, atau akses Web App belum "Anyone".' };
+    }
+  } catch (err) {
+    const aborted = err.name === 'AbortError';
+    return { success: false, network: true, retryable: true,
+      message: aborted ? 'Server terlalu lama merespons.' : (navigator.onLine === false ? 'Perangkat sedang offline.' : 'Koneksi terputus: ' + err.message) };
+  } finally { clearTimeout(timer); }
+}
+
 async function api(action, data, opts) {
   opts = opts || {};
   if (!window.GAS_URL || GAS_URL.indexOf('PASTE_') === 0) {
     return { success: false, message: 'GAS_URL belum diisi di js/config.js' };
   }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeout || 60000);
-  try {
-    const res = await fetch(GAS_URL, {
-      method: 'POST', redirect: 'follow', signal: ctrl.signal,
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action: action, token: AppState.token || '', data: data || {} })
-    });
-    const text = await res.text();
-    let json;
-    try { json = JSON.parse(text); }
-    catch (e) { return { success: false, network: true, message: 'Server membalas HTTP ' + res.status + ' berupa halaman, bukan data JSON. Biasanya URL /exec salah, deployment sudah dihapus, atau akses Web App belum "Anyone".' }; }
-    if (!json.success && json.data && json.data.code === 'AUTH' && !opts.silentAuth) onSessionExpired();
-    return json;
-  } catch (err) {
-    const msg = err.name === 'AbortError' ? 'Server terlalu lama merespons. Coba lagi.' : 'Koneksi gagal: ' + err.message;
-    return { success: false, message: msg, network: true };
-  } finally { clearTimeout(timer); }
+  const isRead = READ_ACTIONS.test(action);
+  const tries = opts.retries !== undefined ? opts.retries + 1 : (isRead ? 3 : 1);
+  let res;
+  for (let i = 0; i < tries; i++) {
+    if (i > 0) {
+      if (Date.now() - _slowToastAt > 15000) { _slowToastAt = Date.now(); showToast('Koneksi lambat', 'Mencoba menghubungi server lagi…', 'warning'); }
+      await new Promise(r => setTimeout(r, 1200 * i));
+      if (navigator.onLine === false) await waitOnline(15000);
+    }
+    // Percobaan pertama lebih singkat agar cepat pulih dari "server dingin" di HP
+    res = await apiOnce(action, data, { timeout: opts.timeout || (isRead ? (i === 0 ? 25000 : 40000) : 90000) });
+    if (res.success || !res.retryable) break;
+  }
+  if (!res.success && res.network && !isRead) res.message += ' Periksa koneksi lalu coba lagi.';
+  if (!res.success && res.data && res.data.code === 'AUTH' && !opts.silentAuth) onSessionExpired();
+  return res;
 }
+
+function waitOnline(ms) {
+  return new Promise(resolve => {
+    if (navigator.onLine !== false) return resolve();
+    const t = setTimeout(done, ms);
+    function done() { clearTimeout(t); window.removeEventListener('online', done); resolve(); }
+    window.addEventListener('online', done);
+  });
+}
+
+/** Pemanasan server: GET ringan saat app dibuka (mengurangi "cold start" GAS di HP). */
+function warmUpServer() {
+  try {
+    const last = +sessionStorage.getItem('dph3:warm') || 0;
+    if (Date.now() - last < 240000 || !window.GAS_URL || GAS_URL.indexOf('PASTE_') === 0) return;
+    sessionStorage.setItem('dph3:warm', String(Date.now()));
+  } catch (e) { /* */ }
+  fetch(GAS_URL + '?ping=' + Date.now(), { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+}
+
+/** Muat skrip/CSS eksternal sesuai kebutuhan (lib admin tidak membebani HP member). */
+const _loaded = {};
+function loadScript(src) {
+  if (_loaded[src]) return _loaded[src];
+  _loaded[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { delete _loaded[src]; rej(new Error('Gagal memuat ' + src)); }; document.head.appendChild(s); });
+  return _loaded[src];
+}
+function loadCss(href) {
+  if (_loaded[href]) return _loaded[href];
+  const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href;
+  const base = document.querySelector('link[href*="css/base.css"]');   // urutan tetap: lib → base → app → tw
+  if (base) document.head.insertBefore(l, base); else document.head.appendChild(l);
+  _loaded[href] = Promise.resolve(); return _loaded[href];
+}
+const AdminLibs = {
+  p: null,
+  ready() {
+    if (this.p) return this.p;
+    loadCss('https://cdn.jsdelivr.net/npm/datatables.net-dt@1.13.8/css/jquery.dataTables.min.css');
+    this.p = Promise.all([
+      loadScript('https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js')
+        .then(() => loadScript('https://cdn.jsdelivr.net/npm/datatables.net@1.13.8/js/jquery.dataTables.min.js')),
+      loadScript('https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js')
+    ]).catch(e => { this.p = null; showToast('Gagal memuat komponen', e.message, 'error'); });
+    return this.p;
+  }
+};
 
 /**
  * Stale-While-Revalidate: tampilkan cache lokal INSTAN, lalu segarkan di latar.
@@ -517,6 +589,8 @@ function hideLoadingOverlay() {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(Store.get('theme', 'light'));
   loadSession();
+  warmUpServer();
+  if (AppState.role === ROLE_ADMIN) AdminLibs.ready();
   window.addEventListener('hashchange', route);
   route();
   hideLoadingOverlay();
@@ -527,4 +601,25 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof Public !== 'undefined') Public.prefetch();
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });
+
+  // Kembali online / app dibuka lagi dari latar belakang (HP) → segarkan data diam-diam
+  window.addEventListener('online', () => { showToast('Kembali online', 'Menyegarkan data…', 'success'); refreshCurrent(); });
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+    else if (hiddenAt && Date.now() - hiddenAt > 120000) { warmUpServer(); refreshCurrent(); }
+  });
 });
+
+function refreshCurrent() {
+  if (AppState.role === ROLE_MEMBER && typeof Member !== 'undefined') Member.refresh();
+  else if (AppState.role === ROLE_ADMIN && Pages[AppState.currentPage] && Pages[AppState.currentPage].show) route();
+  else if (typeof Public !== 'undefined') Public.prefetch();
+}
+
+/** Tampilan gagal dengan tombol "Coba lagi" (dipakai saat belum ada data cache). */
+function errorState(msg, retryJs) {
+  return '<div class="empty-state"><div class="empty-icon" style="color:var(--warning)"><i data-lucide="wifi-off" class="w-7 h-7"></i></div>' +
+    '<p class="text-base font-semibold text-main">Belum bisa terhubung ke server</p><p class="mt-1 text-sm max-w-md">' + esc(msg || '') + '</p>' +
+    '<button class="btn-primary !w-auto mt-4" onclick="' + retryJs + '"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Coba lagi</button></div>';
+}

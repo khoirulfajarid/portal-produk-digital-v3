@@ -238,21 +238,42 @@ ADMIN_RENDER.notifConfig = function (d) {
   const box = document.getElementById('notifBox');
   if (!box || !d) return;
   const c = d.config;
+  const events = d.events || [];
   const tog = (ch, k, label) => '<label class="switch"><input type="checkbox" data-ch="' + ch + '" data-k="' + k + '"' + (c[ch][k] ? ' checked' : '') + '><span></span> ' + label + '</label>';
-  const events = ch => '<div class="grid gap-3 mt-4 pl-1">' + tog(ch, 'access', 'Akses produk aktif (redeem / disetujui / diberi admin) → member') +
-    tog(ch, 'orderNew', 'Pesanan baru → Admin') + tog(ch, 'orderRejected', 'Pesanan ditolak → member') + '</div>';
+  const mini = (ch, k) => '<label class="switch switch-sm" title="' + (ch === 'email' ? 'Email' : 'WhatsApp') + '"><input type="checkbox" data-ch="' + ch + '" data-k="' + k + '"' + (c[ch][k] ? ' checked' : '') + ' onchange="notifCount()"><span></span></label>';
+  const group = (target, title, icon) => {
+    const list = events.filter(e => e.target === target);
+    return '<div class="app-card rounded-2xl p-6"><div class="flex flex-wrap items-center justify-between gap-3 mb-3"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="' + icon + '" class="w-5 h-5 text-accent"></i> ' + title + ' <span class="text-xs text-muted font-normal">(' + list.length + ' notifikasi)</span></h3>' +
+      '<div class="flex gap-2"><button class="btn-ghost !w-auto !py-1.5 !text-xs" onclick="notifBulk(\'' + target + '\',true)">Aktifkan semua</button><button class="btn-ghost !w-auto !py-1.5 !text-xs" onclick="notifBulk(\'' + target + '\',false)">Nonaktifkan semua</button></div></div>' +
+      '<div class="notif-table"><div class="notif-row notif-head"><span>Kejadian</span><span>Email</span><span>WhatsApp</span></div>' +
+      list.map(e => '<div class="notif-row" data-target="' + target + '"><span class="min-w-0"><b class="text-sm text-main">' + esc(e.label) + '</b><small class="mono">' + esc(e.key) + '</small></span>' + mini('email', e.key) + mini('wa', e.key) + '</div>').join('') + '</div></div>';
+  };
   box.innerHTML = '<div class="grid xl:grid-cols-2 gap-6">' +
-    '<div class="app-card rounded-2xl p-6"><div class="flex items-center justify-between"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="mail" class="w-5 h-5 text-accent"></i> Email (Gmail)</h3>' + tog('email', 'enabled', '<b>Aktif</b>') + '</div>' +
-      '<p class="text-sm text-muted mt-2">Sisa kuota hari ini: <b>' + d.emailQuota + '</b> penerima (akun @gmail.com: 100/hari).</p>' + events('email') +
+    '<div class="app-card rounded-2xl p-6"><div class="flex items-center justify-between"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="mail" class="w-5 h-5 text-accent"></i> Email (Gmail)</h3>' + tog('email', 'enabled', '<b>Kanal aktif</b>') + '</div>' +
+      '<p class="text-sm text-muted mt-2">Sisa kuota hari ini: <b>' + d.emailQuota + '</b> penerima (akun @gmail.com: 100/hari). Aktif: <b id="ncEmail">0</b> dari ' + events.length + ' notifikasi.</p>' +
       '<div class="flex gap-2 mt-5"><input id="tEmail" class="form-input" placeholder="Email tujuan tes" value="' + esc(d.adminEmail) + '"><button class="btn-ghost !w-auto" onclick="testNotif(\'email\',this)">Kirim Tes</button></div></div>' +
-    '<div class="app-card rounded-2xl p-6"><div class="flex items-center justify-between"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="message-circle" class="w-5 h-5" style="color:#25D366"></i> WhatsApp (Fonnte)</h3>' + tog('wa', 'enabled', '<b>Aktif</b>') + '</div>' +
+    '<div class="app-card rounded-2xl p-6"><div class="flex items-center justify-between"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="message-circle" class="w-5 h-5" style="color:#25D366"></i> WhatsApp (Fonnte)</h3>' + tog('wa', 'enabled', '<b>Kanal aktif</b>') + '</div>' +
+      '<p class="text-sm text-muted mt-2">Aktif: <b id="ncWa">0</b> dari ' + events.length + ' notifikasi.</p>' +
       '<div class="grid gap-3 mt-4"><div><label class="form-label">Token API Fonnte</label><input id="nfToken" class="form-input mono" type="password" autocomplete="new-password" placeholder="' + (d.fonnteConfigured ? 'Tersimpan: ' + esc(d.fonnteTokenMasked) + ' — isi untuk mengganti' : 'Tempel token dari dashboard Fonnte') + '">' +
         '<p class="text-xs text-muted mt-1">Token disimpan aman di Script Properties (bukan di Sheets). Isi "-" untuk menghapus.</p></div>' +
-      '<div><label class="form-label">No. WhatsApp Admin (penerima notif pesanan)</label><input id="nfAdminWa" class="form-input" inputmode="numeric" value="' + esc(d.adminWhatsApp) + '" placeholder="087818485245"></div></div>' + events('wa') +
+      '<div><label class="form-label">No. WhatsApp Admin (penerima notifikasi Admin)</label><input id="nfAdminWa" class="form-input" inputmode="numeric" value="' + esc(d.adminWhatsApp) + '" placeholder="087818485245"></div></div>' +
       '<div class="flex gap-2 mt-5"><input id="tWa" class="form-input" placeholder="No. WA tujuan tes" value="' + esc(d.adminWhatsApp) + '"><button class="btn-ghost !w-auto" onclick="testNotif(\'wa\',this)">Kirim Tes</button></div></div>' +
-    '</div><div class="flex justify-end mt-6"><button class="btn-primary !w-auto" onclick="saveNotif(this)"><i data-lucide="save" class="w-4 h-4"></i> Simpan Konfigurasi</button></div>';
+    '</div>' +
+    '<div class="notice mt-6"><i data-lucide="info" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Daftar di bawah adalah <b>semua notifikasi otomatis</b> yang dipakai aplikasi. Notifikasi terkirim hanya bila <b>kanal aktif</b> dan sakelar kejadiannya <b>aktif</b>. Blast WA/Email diatur terpisah di menu Blast.</p></div>' +
+    '<div class="grid 2xl:grid-cols-2 gap-6 mt-6">' + group('member', 'Notifikasi ke Member / Customer', 'user') + group('admin', 'Notifikasi ke Admin', 'shield') + '</div>' +
+    '<div class="sticky-save"><button class="btn-primary !w-auto" onclick="saveNotif(this)"><i data-lucide="save" class="w-4 h-4"></i> Simpan Konfigurasi</button></div>';
+  notifCount();
   refreshIcons();
 };
+function notifCount() {
+  const n = ch => document.querySelectorAll('#notifBox .notif-row [data-ch="' + ch + '"]:checked').length;
+  const e = document.getElementById('ncEmail'), w = document.getElementById('ncWa');
+  if (e) e.textContent = n('email'); if (w) w.textContent = n('wa');
+}
+function notifBulk(target, on) {
+  document.querySelectorAll('#notifBox .notif-row[data-target="' + target + '"] [data-ch]').forEach(i => i.checked = on);
+  notifCount();
+}
 async function saveNotif(btn) {
   const cfg = { email: {}, wa: {} };
   document.querySelectorAll('#notifBox [data-ch]').forEach(i => cfg[i.dataset.ch][i.dataset.k] = i.checked);
