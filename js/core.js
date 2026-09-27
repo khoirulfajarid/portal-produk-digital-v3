@@ -52,9 +52,31 @@ function userKey(k) { return 'u:' + (AppState.email || 'anon') + ':' + k; }
 const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin)$/;
 let _slowToastAt = 0;
 
+/**
+ * Pengukur performa (gas-instant-ux-pro · Prinsip 0).
+ * Ketik Perf.table() di console browser: total = waktu yang dirasakan, server = kerja Apps Script, net = jaringan + cold start.
+ */
+const Perf = {
+  rows: [],
+  add(action, total, server) {
+    this.rows.push({ action, total, server: server == null ? null : server, net: server == null ? null : total - server, at: new Date().toLocaleTimeString() });
+    if (this.rows.length > 200) this.rows.shift();
+  },
+  table() { console.table(this.rows.slice(-40)); return this.rows.length + ' panggilan tercatat'; }
+};
+window.Perf = Perf;
+
+/** Hash ringan untuk mendeteksi data berubah (render ulang hanya bila perlu). */
+function hashData(d) {
+  const s = JSON.stringify(d, (k, v) => (k === 'serverTime' || k === 'ms' || k === 'checkedAt') ? undefined : v) || '';
+  let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h + ':' + s.length;
+}
+
 async function apiOnce(action, data, opts) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), opts.timeout);
+  const t0 = performance.now();
   try {
     const res = await fetch(GAS_URL, {
       method: 'POST', redirect: 'follow', signal: ctrl.signal, cache: 'no-store',
@@ -62,7 +84,7 @@ async function apiOnce(action, data, opts) {
       body: JSON.stringify({ action: action, token: AppState.token || '', data: data || {} })
     });
     const text = await res.text();
-    try { return JSON.parse(text); }
+    try { const j = JSON.parse(text); Perf.add(action, Math.round(performance.now() - t0), j.ms); return j; }
     catch (e) {
       // GAS kadang membalas halaman "server sibuk" sesaat → boleh dicoba ulang
       return { success: false, network: true, retryable: res.status >= 500 || res.status === 429,
@@ -119,11 +141,29 @@ function warmUpServer() {
 
 /** Muat skrip/CSS eksternal sesuai kebutuhan (lib admin tidak membebani HP member). */
 const _loaded = {};
-function loadScript(src) {
+function loadScript(src, ordered) {
   if (_loaded[src]) return _loaded[src];
-  _loaded[src] = new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => { delete _loaded[src]; rej(new Error('Gagal memuat ' + src)); }; document.head.appendChild(s); });
+  _loaded[src] = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = src; if (ordered) s.async = false;   // ordered: dieksekusi sesuai urutan sisip
+    s.onload = res; s.onerror = () => { delete _loaded[src]; rej(new Error('Gagal memuat ' + src)); };
+    document.head.appendChild(s);
+  });
   return _loaded[src];
 }
+/** Modul panel Superadmin dimuat hanya untuk Superadmin (HP member tidak mengunduhnya). */
+const AdminBundle = {
+  p: null, loaded: false,
+  files: ['js/admin.js', 'js/admin-people.js', 'js/admin-content.js', 'js/admin-ops.js', 'js/admin-custom.js'],
+  ready() {
+    if (this.p) return this.p;
+    const v = (document.querySelector('script[src^="js/core.js"]') || {}).src || '';
+    const q = v.indexOf('?') > -1 ? v.slice(v.indexOf('?')) : '';
+    this.p = Promise.all(this.files.map(f => loadScript(f + q, true)))
+      .then(() => { this.loaded = true; })
+      .catch(e => { this.p = null; showToast('Gagal memuat panel admin', e.message, 'error'); throw e; });
+    return this.p;
+  }
+};
 function loadCss(href) {
   if (_loaded[href]) return _loaded[href];
   const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href;
@@ -149,14 +189,21 @@ const AdminLibs = {
  * Stale-While-Revalidate: tampilkan cache lokal INSTAN, lalu segarkan di latar.
  * onData dipanggil 1× dari cache (bila ada) dan 1× lagi dengan data baru.
  */
+/**
+ * SWR PRO: onData(data, fromCache, changed). Data server yang sama dengan cache → changed=false
+ * (halaman tidak perlu dirender ulang). opts.fresh (ms) → lewati server bila cache masih segar.
+ */
 async function swr(cacheKey, action, payload, onData, opts) {
   opts = opts || {};
   const cached = Store.get(cacheKey, null);
-  if (cached && cached.data !== undefined) onData(cached.data, true);
+  if (cached && cached.data !== undefined) onData(cached.data, true, true);
+  if (cached && cached.data !== undefined && opts.fresh && Date.now() - (cached.t || 0) < opts.fresh) return { success: true, data: cached.data, cached: true };
   const res = await api(action, payload, opts);
   if (res.success) {
-    Store.set(cacheKey, { t: Date.now(), data: res.data });
-    onData(res.data, false);
+    const h = hashData(res.data);
+    const changed = !cached || cached.h !== h;
+    Store.set(cacheKey, { t: Date.now(), h: h, data: res.data });
+    onData(res.data, false, changed);
   } else if (!cached && opts.onError) opts.onError(res);
   else if (!res.success && !res.network && opts.toastError !== false && res.message) showToast('Gagal memuat', res.message, 'error');
   return res;
@@ -229,6 +276,10 @@ function defaultPage() {
 function route() {
   let r = parseHash();
   let def = Pages[r.name];
+  if (!def && r.name.indexOf('admin-') === 0 && AppState.role === ROLE_ADMIN && !AdminBundle.loaded) {
+    AdminBundle.ready().then(route, () => {});        // panel admin belum termuat → muat lalu tampilkan
+    return;
+  }
   if (!def) { r = { name: defaultPage(), param: null }; def = Pages[r.name]; }
 
   // Penjaga akses
@@ -289,7 +340,7 @@ function esc(v) {
 }
 function escAttr(v) { return esc(v).replace(/\\/g, '\\\\'); }
 function jsArg(v) { return esc(JSON.stringify(String(v === null || v === undefined ? '' : v))); }
-function refreshIcons() { try { lucide.createIcons(); } catch (e) { /* */ } }
+function refreshIcons() { try { if (window.renderIcons) renderIcons(); else lucide.createIcons(); } catch (e) { /* */ } }
 function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 function fmtDate(iso) {
   if (!iso) return '—'; const d = new Date(iso); if (isNaN(d)) return '—';
@@ -334,10 +385,25 @@ function iconFor(c) {
 }
 
 /** Buka link di tab baru TANPA menampilkan URL di layar/href (Point 9). */
+/**
+ * Buka tautan luar di TAB BARU tanpa mengganti tab portal.
+ * Catatan: window.open(url,'_blank','noopener') selalu mengembalikan null (sesuai standar),
+ * dulu memicu fallback location.href → tautan terbuka 2× dan tab portal ikut berpindah.
+ */
 function openLink(url) {
-  if (!url) return;
-  const w = window.open(url, '_blank', 'noopener');
-  if (!w) location.href = url;
+  if (!url) return null;
+  if (/^(mailto|tel|sms|whatsapp):/i.test(url)) { clickLink(url, false); return null; }   // ditangani aplikasi HP/email
+  let w = null;
+  try { w = window.open(url, '_blank'); } catch (e) { w = null; }
+  if (w) { try { w.opener = null; } catch (e) { /* */ } return w; }
+  clickLink(url, true);                   // popup diblokir → tautan biasa ber-target _blank (tab portal tetap)
+  return null;
+}
+function clickLink(url, newTab) {
+  const a = document.createElement('a');
+  a.href = url; a.style.display = 'none';
+  if (newTab) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+  document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 0);
 }
 
 /** Gambar Drive: coba URL cadangan lh3 sekali, lalu jatuh ke placeholder. */
@@ -549,6 +615,11 @@ function setNavBadge(page, count) {
 // 10. DATATABLES & CHART HELPER
 // ════════════════════════════════════════════════════════════
 function buildTable(id, cfg) {
+  const el0 = document.getElementById(id), t0 = AppState.tables[id];
+  // Tabel yang sama masih terpasang → cukup ganti barisnya (tanpa destroy/bangun ulang, posisi halaman tetap)
+  if (t0 && el0 && cfg.data && !cfg.rebuild) {
+    try { if (t0.table().node() === el0 && t0.columns().count() === (cfg.columns || []).length) { t0.clear().rows.add(cfg.data).draw(false); return t0; } } catch (e) { /* bangun ulang */ }
+  }
   if (AppState.tables[id]) { try { AppState.tables[id].destroy(); } catch (e) { /* */ } delete AppState.tables[id]; }
   const el = document.getElementById(id);
   if (!el || !window.jQuery || !jQuery.fn.dataTable) return null;
@@ -590,14 +661,17 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTheme(Store.get('theme', 'light'));
   loadSession();
   warmUpServer();
-  if (AppState.role === ROLE_ADMIN) AdminLibs.ready();
   window.addEventListener('hashchange', route);
-  route();
-  hideLoadingOverlay();
+  if (AppState.role === ROLE_ADMIN) {
+    AdminLibs.ready();
+    AdminBundle.ready().then(() => { route(); hideLoadingOverlay(); Admin.boot(); }, () => { route(); hideLoadingOverlay(); });
+  } else {
+    route();
+    hideLoadingOverlay();
+  }
 
   // Validasi sesi & muat data di latar (UI sudah tampil dari cache)
   if (AppState.role === ROLE_MEMBER && typeof Member !== 'undefined') Member.refresh();
-  if (AppState.role === ROLE_ADMIN && typeof Admin !== 'undefined') Admin.boot();
   if (typeof Public !== 'undefined') Public.prefetch();
 
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closePreview(); });

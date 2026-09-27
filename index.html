@@ -20,13 +20,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
   <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/base.css">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/base.css?v=3.2">
+  <link rel="stylesheet" href="css/app.css?v=3.2">
   <!-- Tailwind v3 hasil build (pengganti CDN Play: tanpa kompilasi di browser → jauh lebih ringan di HP) -->
-  <link rel="stylesheet" href="css/tw.css">
+  <link rel="stylesheet" href="css/tw.css?v=3.2">
 
-  <!-- Skrip: defer = tidak memblokir tampilan. jQuery/DataTables/Chart.js dimuat otomatis hanya untuk Superadmin -->
-  <script src="https://cdn.jsdelivr.net/npm/lucide@0.446.0/dist/umd/lucide.min.js" defer></script>
+  <!-- Skrip: defer = tidak memblokir tampilan. jQuery/DataTables/Chart.js & modul admin dimuat otomatis hanya untuk Superadmin -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js" defer></script>
   <!-- Google Identity Services — Sign in with Google (Superadmin) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -163,15 +162,12 @@
   <div id="toastStack" class="toast-stack"></div>
 
   <!-- Urutan penting: config → core → modul -->
-  <script src="js/config.js" defer></script>
-  <script src="js/core.js" defer></script>
-  <script src="js/public.js" defer></script>
-  <script src="js/member.js" defer></script>
-  <script src="js/custom.js" defer></script>
-  <script src="js/admin.js" defer></script>
-  <script src="js/admin-people.js" defer></script>
-  <script src="js/admin-content.js" defer></script>
-  <script src="js/admin-ops.js" defer></script>
-  <script src="js/admin-custom.js" defer></script>
+  <!-- v3.2: ikon = subset Lucide (28 KB, sebelumnya 354 KB). Modul admin (admin*.js) dimuat otomatis khusus Superadmin. -->
+  <script src="js/config.js?v=3.2" defer></script>
+  <script src="js/icons.js?v=3.2" defer></script>
+  <script src="js/core.js?v=3.2" defer></script>
+  <script src="js/public.js?v=3.2" defer></script>
+  <script src="js/member.js?v=3.2" defer></script>
+  <script src="js/custom.js?v=3.2" defer></script>
 </body>
 </html>

@@ -10,11 +10,11 @@ const Public = {
 
   /** Muat data publik di latar (dipakai juga untuk logo & Client ID Google). */
   prefetch() {
-    return swr('pub', 'publicBootstrap', {}, (d) => {
+    return swr('pub', 'publicBootstrap', {}, (d, fromCache, changed) => {
       AppState.pub = d;
       rememberBrand(d.settings);
       Public.loaded = true;
-      if (AppState.currentPage === 'explore') renderExplore();
+      if (AppState.currentPage === 'explore' && (fromCache || changed || !document.querySelector('#exploreRoot .hero'))) renderExplore();
       if (AppState.currentPage === 'login') Login.initGoogle();
       renderPubnav();
       if (document.body.classList.contains('layout-admin') && typeof renderSidebarBrand === 'function') renderSidebarBrand();
@@ -302,15 +302,16 @@ async function askAdmin(channel, interest) {
   if (!r.isConfirmed) return;
   const v = r.value;
   Store.set('lead', { name: v.name, whatsapp: v.whatsapp, email: v.email });
-  // Buka tab dulu (sinkron) agar tidak diblokir popup blocker, lalu isi URL setelah lead tersimpan
-  const win = window.open('', '_blank');
+  // Buka tab dulu (sinkron, masih dalam klik user) agar tidak diblokir popup blocker. Email → aplikasi email, tanpa tab kosong.
+  const win = channel === 'WhatsApp' ? window.open('', '_blank') : null;
+  if (win) try { win.opener = null; } catch (e) { /* */ }
   const text = v.msg + '\n\nNama: ' + v.name + '\nWA: ' + v.whatsapp + (v.email ? '\nEmail: ' + v.email : '') + (interest ? '\nMinat: ' + interest : '');
   const url = channel === 'WhatsApp'
     ? waLink(s.adminWhatsApp, text)
     : 'mailto:' + s.adminEmail + '?subject=' + encodeURIComponent('Pertanyaan: ' + (interest || 'Info')) + '&body=' + encodeURIComponent(text);
   api('submitLead', { name: v.name, whatsapp: v.whatsapp, email: v.email, channel: channel, interest: interest || '' })
     .then(res => { if (!res.success && !res.network) showToast('Catatan', res.message, 'warning'); });
-  if (win) win.location.href = url; else location.href = url;
+  if (win) win.location.href = url; else openLink(url);             // tidak pernah mengganti tab portal
 }
 
 
@@ -411,6 +412,8 @@ const Login = {
     if (!res.success) { Swal.fire({ icon: 'error', title: 'Akses ditolak', text: res.message }); return; }
     saveSession(res.data);
     showToast('Selamat datang', res.data.name, 'success');
+    AdminLibs.ready();
+    try { await AdminBundle.ready(); } catch (e) { return; }
     Admin.boot();
     go('admin/dashboard');
   }
@@ -460,11 +463,20 @@ registerPage('login', {
 
 function onMemberLogin(d) {
   saveSession(d);
-  if (d.profile) {
-    AppState.m = AppState.m || Store.get(userKey('boot'), { data: null }).data;
-  }
   const next = Store.get('afterLogin', '');
   if (next) Store.del('afterLogin');
+  if (d.boot) {
+    // v3.2: data beranda ikut di respons login → langsung tampil, tanpa panggilan kedua ke server
+    AppState.m = d.boot;
+    Store.set(userKey('boot'), { t: Date.now(), h: hashData(d.boot), data: d.boot });
+    Member._lastFetch = Date.now();
+    rememberBrand(d.boot.settings);
+    go(next && Pages[next] ? next : 'home');
+    Member.renderMounted();
+    Member.showAnnouncements();
+    return;
+  }
+  AppState.m = AppState.m || Store.get(userKey('boot'), { data: null }).data;
   go(next && Pages[next] ? next : 'home');
   Member.refresh();
 }
@@ -499,6 +511,6 @@ async function openRedeemDialog(prefillEmail) {
   const res = r.value, d = res.data;
   if (d.token) { Login.pushHistory(d.email); saveSession(d); }
   await Swal.fire({ icon: 'success', title: d.isNew ? 'Akun dibuat & akses aktif!' : 'Berhasil!', text: res.message, confirmButtonText: 'Buka Sekarang' });
-  delete AppState.detail[d.productId];
+  forgetDetail(d.productId);
   if (AppState.role === ROLE_MEMBER) { await Member.refresh(); go('product', d.productId); }
 }

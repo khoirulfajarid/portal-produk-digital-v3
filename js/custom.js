@@ -253,9 +253,11 @@ function renderCustomDetail() {
   } else if (r.status === 'Selesai' || r.status === 'Diterima') {
     const dv = r.delivery || {};
     action = '<h3 class="font-semibold text-main mb-3">🎉 Aplikasi Anda Sudah Jadi</h3>' +
-      (dv.videoEmbed ? '<div class="video-frame mb-4"><iframe src="' + esc(dv.videoEmbed) + '" allowfullscreen allow="encrypted-media; picture-in-picture"></iframe></div>' : '') +
+      (dv.videoEmbed && !dv.productId ? '<div class="video-frame mb-4"><iframe src="' + esc(dv.videoEmbed) + '" allowfullscreen allow="encrypted-media; picture-in-picture"></iframe></div>' : '') +
       (dv.note ? '<p class="text-sm text-muted whitespace-pre-line mb-4">' + esc(dv.note) + '</p>' : '') +
-      '<div class="flex flex-wrap gap-3">' + (dv.fileUrl ? '<button class="btn-primary !w-auto" onclick="openLink(' + jsArg(dv.fileUrl) + ')"><i data-lucide="download" class="w-4 h-4"></i> Download Aplikasi (.zip)</button>' : '') +
+      (dv.productId ? '<div class="notice notice-success mb-4"><i data-lucide="package-open" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Paket lengkap berisi <b>file aplikasi (.zip), video tutorial, dan dokumen pendukung</b>. Tersimpan juga di menu <b>Kelas Saya</b>.</p></div>' : '') +
+      '<div class="flex flex-wrap gap-3">' + (dv.productId ? '<button class="btn-primary !w-auto" onclick="go(\'product\',' + jsArg(dv.productId) + ')"><i data-lucide="app-window" class="w-4 h-4"></i> Buka Aplikasi (video, file &amp; dokumen)</button>' : '') +
+      (dv.fileUrl ? '<button class="' + (dv.productId ? 'btn-ghost' : 'btn-primary') + ' !w-auto" onclick="openLink(' + jsArg(dv.fileUrl) + ')"><i data-lucide="download" class="w-4 h-4"></i> Download Aplikasi (.zip)</button>' : '') +
       (r.status === 'Selesai' ? '<button class="btn-ghost !w-auto" onclick="customAcceptDelivery(' + jsArg(r.id) + ')"><i data-lucide="check-circle-2" class="w-4 h-4"></i> Oke, Aplikasi Diterima</button>' : '') + '</div>' +
       (r.status === 'Diterima' && !r.demoConsent ? '<div class="notice notice-warning mt-4"><i data-lucide="presentation" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Bolehkah aplikasi ini dibuatkan demo untuk etalase pameran kami?</p><button class="btn-primary !w-auto" onclick="customDemoConsent(' + jsArg(r.id) + ')">Jawab</button></div>' : '') +
       (r.demoConsent ? '<p class="text-xs text-muted mt-3">Izin etalase: ' + (r.demoConsent === 'yes' ? 'boleh dibuatkan demo' : 'hanya preview video sekilas') + '.</p>' : '');

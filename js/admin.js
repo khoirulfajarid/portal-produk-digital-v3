@@ -46,40 +46,59 @@ const ACTION_LABELS = {
 const Admin = {
   booted: false,
 
-  /** Dipanggil saat panel dibuka: validasi sesi + prefetch data inti di latar. */
+  /**
+   * Dipanggil saat panel dibuka. v3.2: data menu inti diambil dalam SATU panggilan (batch),
+   * lalu menu lain disiapkan saat browser senggang → pindah menu instan tanpa menunggu server.
+   */
   async boot() {
     if (this.booted) return;
     this.booted = true;
-    const s = await api('session');
-    if (!s.success) return;
     Public.prefetch();
-    // Prefetch berurutan (tidak membanjiri server) → menu lain terbuka instan
-    ['dashboard', 'ordersAdmin', 'productsAdmin', 'crm'].reduce((p, act) => p.then(() => this.fetch(act)), Promise.resolve());
+    const first = await this.prefetch(['dashboard', 'ordersAdmin', 'productsAdmin', 'crm', 'customAdmin']);
+    if (!first || !first.success) { this.booted = false; return; }
+    const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1500));
+    idle(() => this.prefetch(['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin'], true));
     clearInterval(AppState.timers.kpi);
-    AppState.timers.kpi = setInterval(() => { if (document.visibilityState === 'visible') this.fetch('dashboard'); }, 60000);
+    AppState.timers.kpi = setInterval(() => { if (document.visibilityState === 'visible') this.fetch('dashboard'); }, 90000);
+  },
+
+  /** Beberapa aksi baca dalam 1 panggilan server. skipFresh: lewati aksi yang cachenya masih segar. */
+  async prefetch(actions, skipFresh) {
+    const list = skipFresh ? actions.filter(a => !this.isFresh(a, 120000)) : actions;
+    if (!list.length) return { success: true };
+    const res = await api('batch', { calls: list.map(a => ({ action: a })) });
+    if (res.success) Object.keys(res.data).forEach(a => { const r = res.data[a]; if (r && r.success) this.ingest(a, r.data); });
+    return res;
   },
 
   key(action) { return userKey('a:' + action); },
   cached(action) { const c = Store.get(this.key(action), null); return c ? c.data : null; },
+  isFresh(action, ms) { const c = Store.get(this.key(action), null); return !!(c && c.t && Date.now() - c.t < ms); },
 
-  /** Ambil data admin → simpan cache → render ulang halaman terkait bila sedang terbuka. */
+  /** Simpan data → badge → render ulang HANYA bila data berubah (tabel tidak dibangun ulang sia-sia). */
+  ingest(action, data, force) {
+    const h = hashData(data), prev = Store.get(this.key(action), null);
+    const changed = force || !prev || prev.h !== h || !AppState.a[action];
+    AppState.a[action] = data;
+    Store.set(this.key(action), { t: Date.now(), h: h, data: data });
+    if (action === 'dashboard') setDashBadges(data.kpi);
+    if (action === 'ordersAdmin') setNavBadge('orders', data.kpi.pending);
+    const r = ADMIN_RENDER[action];
+    if (r && changed) r(data);
+  },
+
+  /** Ambil data admin dari server (dipakai setelah aksi simpan & tombol Segarkan). */
   async fetch(action, payload) {
     const res = await api(action, payload || {});
-    if (res.success) {
-      AppState.a[action] = res.data;
-      Store.set(this.key(action), { t: Date.now(), data: res.data });
-      if (action === 'dashboard') setDashBadges(res.data.kpi);
-      if (action === 'ordersAdmin') setNavBadge('orders', res.data.kpi.pending);
-      const r = ADMIN_RENDER[action];
-      if (r) r(res.data);
-    }
+    if (res.success) this.ingest(action, res.data);
     return res;
   },
 
-  /** SWR untuk halaman admin: render dari cache, lalu segarkan. */
+  /** SWR untuk halaman admin: render dari cache seketika; ke server hanya bila cache > 30 detik. */
   load(action, payload) {
     const c = AppState.a[action] || this.cached(action);
     if (c) { AppState.a[action] = c; const r = ADMIN_RENDER[action]; if (r) r(c); }
+    if (c && this.isFresh(action, 30000)) return Promise.resolve({ success: true, data: c, cached: true });
     return this.fetch(action, payload);
   }
 };
@@ -315,8 +334,9 @@ adminRoute('products', {
   show: () => Admin.load('productsAdmin')
 });
 
-ADMIN_RENDER.productsAdmin = function (list) {
-  if (!document.getElementById('tblProducts') || !list) return;
+ADMIN_RENDER.productsAdmin = function (all) {
+  if (!document.getElementById('tblProducts') || !all) return;
+  const list = all.filter(p => !p.customReqId);          // paket Aplikasi Custom dikelola dari menu Aplikasi Custom
   const rows = list.filter(p => (PF.cat === 'all' || p.Category === PF.cat) && (PF.status === 'all' || p.Status === PF.status));
   document.getElementById('pfCount').textContent = rows.length + ' dari ' + list.length + ' produk';
   buildTable('tblProducts', {
@@ -355,9 +375,15 @@ async function setProductStatus(id, status) {
 // ── Form produk (SweetAlert2 besar) ──
 const F = { thumb: {}, episodes: [], resources: [], slides: [], pvideos: [], doc: null, cat: 'Kelas' };
 
-function openProductForm(id) {
-  const p = id ? (AppState.a.productsAdmin || []).filter(x => x.Product_ID === id)[0] : null;
-  F.cat = p ? p.Category : 'Kelas';
+/**
+ * Form produk. opts.custom = pengajuan Aplikasi Custom → mode "Serah Terima":
+ * kategori terkunci Aplikasi, privat untuk customer, tanpa harga/Lynk/publik (v3.2).
+ */
+function openProductForm(id, opts) {
+  opts = opts || {};
+  const cr = opts.custom || null;
+  const p = cr ? (opts.product || null) : (id ? (AppState.a.productsAdmin || []).filter(x => x.Product_ID === id)[0] : null);
+  F.cat = cr ? 'Aplikasi' : (p ? p.Category : 'Kelas');
   F.thumb = { mode: p ? p.Thumbnail_Mode : 'youtube', fileId: p ? p.Thumbnail_File_ID : '', url: p ? p.Thumbnail_URL : '' };
   F.episodes = p ? JSON.parse(JSON.stringify(p.episodes || [])) : [];
   F.resources = p ? JSON.parse(JSON.stringify(p.resources || [])) : [];
@@ -369,18 +395,21 @@ function openProductForm(id) {
   const cats = [['Kelas', 'Kelas (video series)'], ['Aplikasi', 'Aplikasi'], ['Document', 'Dokumen'], ['AI Link', 'AI Link']];
   const field = (id2, label, val, ph, type) => '<div><label class="form-label" for="' + id2 + '">' + label + '</label><input id="' + id2 + '" type="' + (type || 'text') + '" class="form-input" value="' + esc(val || '') + '" placeholder="' + esc(ph || '') + '"></div>';
 
+  const hideCss = cr ? ' style="display:none"' : '';
   Swal.fire({
-    title: p ? 'Ubah Produk' : 'Produk Baru', width: 860, showCancelButton: true, focusConfirm: false,
-    confirmButtonText: p ? 'Simpan Perubahan' : 'Tambah Produk', cancelButtonText: 'Batal',
+    title: cr ? (p ? 'Ubah Paket Serah Terima' : 'Serahkan Aplikasi Custom') : (p ? 'Ubah Produk' : 'Produk Baru'), width: 860, showCancelButton: true, focusConfirm: false,
+    confirmButtonText: cr ? (p ? 'Simpan & Kirim Pembaruan' : 'Kirim ke Customer') : (p ? 'Simpan Perubahan' : 'Tambah Produk'), cancelButtonText: 'Batal',
     html: '<div class="pform">' +
-      '<div class="grid2">' + field('fTitle', 'Judul *', p && p.Title, 'Nama produk') +
-        '<div><label class="form-label" for="fCat">Kategori *</label><select id="fCat" class="form-input">' + cats.map(c => '<option value="' + c[0] + '"' + (F.cat === c[0] ? ' selected' : '') + '>' + c[1] + '</option>').join('') + '</select></div></div>' +
-      field('fTag', 'Tagline singkat', p && p.Tagline, 'Satu kalimat yang menjual') +
-      '<div><label class="form-label" for="fDesc">Deskripsi</label><textarea id="fDesc" class="form-input" rows="3">' + esc(p ? p.Description : '') + '</textarea></div>' +
-      '<div class="grid3">' + field('fPrice', 'Harga (Rp)', p ? p.Price : 0, '0 = gratis', 'number') +
+      (cr ? '<div class="notice"><i data-lucide="lock" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1 text-left">Paket khusus untuk <b>' + esc(cr.fullName) + '</b> (' + esc(cr.email) + ') — <b>' + esc(cr.id) + '</b>. ' +
+        'Tidak tampil di katalog/halaman publik; otomatis masuk menu <b>Kelas Saya</b> milik customer.</p></div>' : '') +
+      '<div class="grid2">' + field('fTitle', 'Judul *', p ? p.Title : (cr ? cr.title : ''), 'Nama produk') +
+        '<div><label class="form-label" for="fCat">Kategori *</label><select id="fCat" class="form-input"' + (cr ? ' disabled' : '') + '>' + cats.map(c => '<option value="' + c[0] + '"' + (F.cat === c[0] ? ' selected' : '') + '>' + c[1] + '</option>').join('') + '</select></div></div>' +
+      field('fTag', 'Tagline singkat', p && p.Tagline, cr ? 'mis. Aplikasi absensi guru berbasis Google Sheets' : 'Satu kalimat yang menjual') +
+      '<div><label class="form-label" for="fDesc">Deskripsi</label><textarea id="fDesc" class="form-input" rows="3"' + (cr ? ' placeholder="Gambaran aplikasi, fitur utama, cara pakai singkat"' : '') + '>' + esc(p ? p.Description : '') + '</textarea></div>' +
+      '<div class="grid3" id="pfRowPrice"' + hideCss + '>' + field('fPrice', 'Harga (Rp)', p ? p.Price : 0, '0 = gratis', 'number') +
         '<div><label class="form-label" for="fStatus">Status</label><select id="fStatus" class="form-input"><option value="Active"' + (!p || p.Status === 'Active' ? ' selected' : '') + '>Active</option><option value="Draft"' + (p && p.Status === 'Draft' ? ' selected' : '') + '>Draft</option></select></div>' +
         field('fSort', 'Urutan tampil', p && p.Sort_Order ? p.Sort_Order : '', '1, 2, 3…', 'number') + '</div>' +
-      '<div class="grid2">' + field('fLynk', 'Link checkout Lynk.id', p && p.Lynk_URL, 'https://lynk.id/…') +
+      '<div class="grid2" id="pfRowLynk"' + hideCss + '>' + field('fLynk', 'Link checkout Lynk.id', p && p.Lynk_URL, 'https://lynk.id/…') +
         '<div><label class="form-label">Tampil di halaman Open Access</label><label class="switch mt-2"><input type="checkbox" id="fPublic"' + (p ? (p.isPublic ? ' checked' : '') : ' checked') + '><span></span> Publik</label></div></div>' +
       '<div id="boxWa">' + field('fWa', 'Link WhatsApp Group (khusus pemilik produk ini)', p && p.WA_Group_URL, 'https://chat.whatsapp.com/…') + '</div>' +
 
@@ -396,13 +425,15 @@ function openProductForm(id) {
         '</div></div></div>' +
 
       // Aplikasi: preview publik
-      '<div id="boxApp" class="pf-section"><p class="pf-title"><i data-lucide="images" class="w-4 h-4"></i> Preview Aplikasi (terlihat publik)</p>' +
+      '<div id="boxApp" class="pf-section"><p class="pf-title"><i data-lucide="images" class="w-4 h-4"></i> Preview Aplikasi (' + (cr ? 'terlihat oleh customer' : 'terlihat publik') + ')</p>' +
         '<div class="flex items-center justify-between"><label class="form-label !m-0">Slide Gambar</label><div class="flex gap-1.5"><button type="button" class="btn-ghost !w-auto !py-1 !px-2 !text-xs" onclick="addSlide(\'upload\')">+ Upload</button><button type="button" class="btn-ghost !w-auto !py-1 !px-2 !text-xs" onclick="addSlide(\'url\')">+ URL</button></div></div>' +
         '<div id="fSlides" class="grid gap-2 mt-2"></div>' +
         '<div class="flex items-center justify-between mt-4"><label class="form-label !m-0">Video Preview (YouTube)</label><button type="button" class="btn-ghost !w-auto !py-1 !px-2 !text-xs" onclick="addVideo(\'pvideos\')">+ Video</button></div>' +
         '<div id="fPvideos" class="grid gap-2 mt-2"></div>' +
         '<p class="pf-title mt-5"><i data-lucide="lock" class="w-4 h-4"></i> Isi Terkunci (hanya pembeli)</p>' +
-        '<label class="form-label">File Source Code (.zip, maks 25 MB)</label><div class="dropzone" id="fSrcDrop"><i data-lucide="file-archive" class="w-6 h-6 mx-auto mb-1"></i><p class="text-[13px] font-semibold">Klik atau seret file source code</p></div><input type="file" id="fSrcFile" class="hidden"><p id="fSrcInfo" class="text-xs mt-2 text-accent"></p>' +
+        '<label class="form-label">File Source Code (.zip, maks 25 MB)' + (cr ? ' *' : '') + '</label><div class="dropzone" id="fSrcDrop"><i data-lucide="file-archive" class="w-6 h-6 mx-auto mb-1"></i><p class="text-[13px] font-semibold">Klik atau seret file source code</p></div><input type="file" id="fSrcFile" class="hidden"><p id="fSrcInfo" class="text-xs mt-2 text-accent"></p>' +
+        (cr ? '<label class="form-label mt-3" for="fSrcLink">…atau tempel link Google Drive file ZIP (untuk berkas &gt; 25 MB)</label><input id="fSrcLink" class="form-input" placeholder="https://drive.google.com/file/d/…" value="">' +
+          '<p class="text-[11px] text-muted mt-1">Atur akses file: "Siapa saja yang memiliki link".</p>' : '') +
       '</div>' +
 
       // Kelas & Aplikasi: video + materi
@@ -414,6 +445,7 @@ function openProductForm(id) {
 
       '<div id="boxDoc" class="pf-section"><label class="form-label">Berkas Dokumen (maks 25 MB)</label><div class="dropzone" id="fDocDrop"><i data-lucide="upload-cloud" class="w-6 h-6 mx-auto mb-1"></i><p class="text-[13px] font-semibold">Klik atau seret berkas</p><p class="text-[11px]">PDF, DOC, PPT, XLSX, ZIP</p></div><input type="file" id="fDocFile" class="hidden"><p id="fDocInfo" class="text-xs mt-2 text-accent"></p></div>' +
       '<div id="boxLink" class="pf-section">' + field('fLink', 'Link AI (GEMS / GPTs / Claude) *', p && p.External_Link, 'https://…') + '</div>' +
+      (cr ? '<div class="pf-section"><label class="form-label" for="fCustNote">Catatan serah terima untuk customer</label><textarea id="fCustNote" class="form-input" rows="3" placeholder="Langkah instalasi singkat, akun demo, masa garansi revisi, dll.">' + esc((cr.delivery && cr.delivery.note) || '') + '</textarea></div>' : '') +
     '</div>',
     didOpen: () => {
       document.getElementById('fCat').addEventListener('change', syncProductForm);
@@ -423,6 +455,7 @@ function openProductForm(id) {
       syncProductForm(); renderVideoRows('episodes'); renderVideoRows('pvideos'); renderResRows(); renderSlides();
       setThumbMode(F.thumb.mode || 'url');
       if (F.doc) { document.getElementById('fDocInfo').textContent = '✓ ' + F.doc.name; document.getElementById('fSrcInfo').textContent = '✓ ' + F.doc.name; }
+      if (cr && F.doc) { const l = document.getElementById('fSrcLink'); if (l) l.value = 'https://drive.google.com/file/d/' + F.doc.fileId + '/view'; }
       refreshIcons();
     },
     preConfirm: () => {
@@ -439,6 +472,12 @@ function openProductForm(id) {
       const link = document.getElementById('fLink').value.trim();
       if (cat === 'AI Link' && !/^https?:\/\//i.test(link)) return Swal.showValidationMessage('Link AI harus diawali https://');
       for (const k of ['fLynk', 'fWa']) { const v = document.getElementById(k).value.trim(); if (v && !/^https?:\/\//i.test(v)) return Swal.showValidationMessage('Link harus diawali https://'); }
+      let zipId = F.doc ? F.doc.fileId : '';
+      if (cr) {
+        const lnk = document.getElementById('fSrcLink').value.trim();
+        if (lnk) { const idFromLink = driveIdOf(lnk); if (!idFromLink) return Swal.showValidationMessage('Link Google Drive ZIP tidak valid.'); zipId = idFromLink; }
+        if (!zipId) return Swal.showValidationMessage('Lampirkan file source code (.zip) — unggah atau tempel link Google Drive.');
+      }
       return {
         Product_ID: p ? p.Product_ID : '', Title: title, Category: cat, Tagline: document.getElementById('fTag').value.trim(),
         Description: document.getElementById('fDesc').value.trim(), Price: price, Status: document.getElementById('fStatus').value,
@@ -447,11 +486,13 @@ function openProductForm(id) {
         Thumbnail_Mode: F.thumb.mode, Thumbnail_File_ID: F.thumb.fileId,
         Thumbnail_URL: F.thumb.mode === 'url' ? document.getElementById('fThumbUrl').value.trim() : F.thumb.url,
         episodes: eps, resources: F.resources.filter(r => r.title), slides: F.slides.filter(s => s.fileId || s.url),
-        previewVideos: F.pvideos.filter(v => v.url && v.url.trim()), External_Link: link, Drive_File_ID: F.doc ? F.doc.fileId : ''
+        previewVideos: F.pvideos.filter(v => v.url && v.url.trim()), External_Link: link, Drive_File_ID: zipId,
+        _note: cr ? document.getElementById('fCustNote').value.trim() : ''
       };
     }
   }).then(async r => {
     if (!r.isConfirmed) return;
+    if (cr) return submitCustomDelivery(cr, r.value);
     Swal.fire({ title: 'Menyimpan…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
     const res = await api('saveProduct', r.value);
     Swal.close();

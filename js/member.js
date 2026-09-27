@@ -22,12 +22,10 @@ const Member = {
   /** Bootstrap 1 panggilan: tampil dari cache dulu, lalu segarkan di latar. */
   refresh() {
     if (this._loading) return this._loading;
-    this._loading = swr(userKey('boot'), 'memberBootstrap', {}, (d, fromCache) => {
+    this._loading = swr(userKey('boot'), 'memberBootstrap', {}, (d, fromCache, changed) => {
       AppState.m = d;
-      rememberBrand(d.settings);
-      if (!fromCache) Member._lastFetch = Date.now();
-      Member.renderMounted();
-      if (!fromCache) Member.showAnnouncements();
+      if (fromCache || changed) { rememberBrand(d.settings); Member.renderMounted(); }   // data sama → tidak render ulang
+      if (!fromCache) { Member._lastFetch = Date.now(); Member.showAnnouncements(); }
     }, { onError: res => Member.renderError(res.message) }).finally(() => { this._loading = null; });
     return this._loading;
   },
@@ -238,7 +236,7 @@ function contactAdmin(topic) {
   const p = Member.profile();
   const text = 'Halo Admin, saya ' + (p.nickname || '') + ' (' + AppState.email + '). ' + (topic || '');
   if (s.adminWhatsApp) openLink(waLink(s.adminWhatsApp, text));
-  else if (s.adminEmail) location.href = 'mailto:' + s.adminEmail + '?subject=' + encodeURIComponent(topic || 'Bantuan') + '&body=' + encodeURIComponent(text);
+  else if (s.adminEmail) openLink('mailto:' + s.adminEmail + '?subject=' + encodeURIComponent(topic || 'Bantuan') + '&body=' + encodeURIComponent(text));
 }
 
 
@@ -302,14 +300,22 @@ registerPage('product', {
   show: (el, id) => openDetail(id)
 });
 
+/** Hapus cache detail produk (memori + perangkat) agar diambil ulang dari server. */
+function forgetDetail(id) { delete AppState.detail[id]; if (AppState.detailAt) delete AppState.detailAt[id]; Store.del(userKey('det:' + id)); }
+
 async function openDetail(id) {
   const box = document.getElementById('detailRoot');
   if (!id) return go('library');
   AppState.detailId = id;
   AppState.episode = 0;
+  const stored = AppState.detail[id] ? null : Store.get(userKey('det:' + id), null);   // v3.2: tersimpan di perangkat
+  if (stored && stored.data) { AppState.detail[id] = stored.data; AppState.detailAt = AppState.detailAt || {}; AppState.detailAt[id] = stored.t; }
   const cached = AppState.detail[id];
-  if (cached) renderDetail(cached);
-  else {
+  if (cached) {
+    renderDetail(cached);
+    AppState.detailAt = AppState.detailAt || {};
+    if (cached.owned && !cached.needProfile && Date.now() - (AppState.detailAt[id] || 0) < 120000) return;   // masih segar (< 2 menit) → tanpa ke server
+  } else {
     const sum = AppState.m && AppState.m.catalog.filter(p => p.Product_ID === id)[0];
     box.innerHTML = '<div class="lg:col-span-2 space-y-6"><div class="skeleton" style="aspect-ratio:16/9"></div><div class="skeleton h-28"></div></div><div class="skeleton h-80"></div>';
     if (sum) document.title = sum.Title + ' · ' + appTitle();
@@ -317,8 +323,11 @@ async function openDetail(id) {
   const res = await api('productDetail', { productId: id });
   if (AppState.detailId !== id) return;                       // pengguna sudah pindah halaman
   if (!res.success) { if (!cached) box.innerHTML = '<div class="lg:col-span-3">' + emptyState('alert-circle', 'Tidak dapat dibuka', res.message) + '</div>'; refreshIcons(); return; }
+  const same = cached && hashData(cached) === hashData(res.data);
   AppState.detail[id] = res.data;
-  renderDetail(res.data);
+  AppState.detailAt = AppState.detailAt || {}; AppState.detailAt[id] = Date.now();
+  Store.set(userKey('det:' + id), { t: Date.now(), data: res.data });
+  if (!same) renderDetail(res.data);                           // isi sama → video yang sedang diputar tidak di-reset
 }
 
 function renderDetail(p) {
@@ -500,7 +509,7 @@ async function openProfileDialog(productId) {
   showToast('Data tersimpan', r.value.message, 'success');
   renderTopnav();
   if (document.getElementById('homeRoot')) renderHome();
-  if (productId) { delete AppState.detail[productId]; openDetail(productId); }
+  if (productId) { forgetDetail(productId); openDetail(productId); }
 }
 
 

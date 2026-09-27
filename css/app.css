@@ -288,3 +288,9 @@ body.layout-admin #topnav, body.layout-admin #pubnav { display: none !important;
   .swal2-actions { flex-wrap: wrap; gap: .35rem; }
 }
 @media (max-width: 1180px) { .prod-thumb { display: none; } .prod-cell { width: 240px; min-width: 170px; } }
+
+/* v3.2 — paket serah terima Aplikasi Custom */
+.deliv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .5rem; }
+.deliv-item { display: flex; align-items: center; gap: .5rem; padding: .6rem .75rem; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--surface-2); font-size: 13px; color: var(--text-muted); }
+.deliv-item.is-ok { color: var(--text-main); border-color: rgba(16,185,129,.35); background: rgba(16,185,129,.08); }
+.deliv-item.is-ok i { color: var(--success); }

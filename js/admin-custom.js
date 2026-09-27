@@ -134,18 +134,22 @@ function renderCaDetail(d) {
       '<textarea id="cpNote" rows="2" class="form-input" placeholder="mis. Halaman login & dashboard sudah jadi, lanjut modul laporan.">' + esc(r.progressNote) + '</textarea>' +
       '<button id="caProgBtn" class="btn-ghost !w-auto mt-3" onclick="caProgress(' + jsArg(r.id) + ')"><i data-lucide="send" class="w-4 h-4"></i> Kirim Progres ke Customer</button>'));
   }
-  if (st === 'Dikerjakan' || st === 'Selesai') {
-    const dv = r.delivery || {};
-    CA.fileId = dv.fileId || '';
-    acts.push(card(st === 'Selesai' ? 'Perbarui Berkas Serah Terima' : 'Serahkan Aplikasi', 'package-check',
-      '<label class="form-label">Berkas aplikasi (.zip) *</label>' +
-      '<div class="flex flex-wrap gap-2 items-center"><button type="button" id="caZipBtn" class="btn-ghost !w-auto" onclick="caPickZip(' + jsArg(r.id) + ')"><i data-lucide="upload-cloud" class="w-4 h-4"></i> Unggah ZIP (maks. 25 MB)</button>' +
-        '<span class="text-xs text-muted">atau tempel link Google Drive:</span></div>' +
-      '<input id="cdDrive" class="form-input mt-2" placeholder="https://drive.google.com/file/d/…" value="' + esc(dv.fileId ? 'https://drive.google.com/file/d/' + dv.fileId + '/view' : '') + '">' +
-      '<p id="cdFileInfo" class="text-xs text-muted mt-1">' + (dv.fileId ? '✅ Berkas tersimpan · <button class="text-accent" onclick="openLink(' + jsArg(dv.fileUrl) + ')">unduh</button>' : 'Berkas >25 MB: unggah manual ke Drive (akses "Siapa saja yang memiliki link"), lalu tempel link-nya.') + '</p>' +
-      '<div class="mt-4"><label class="form-label">Video tutorial (YouTube)</label><input id="cdVideo" class="form-input" value="' + esc(dv.videoUrl || '') + '" placeholder="https://youtu.be/…" oninput="caVideoPreview()"><div id="cdVideoPrev" class="mt-2"></div></div>' +
-      '<div class="mt-3"><label class="form-label">Catatan serah terima</label><textarea id="cdNote" rows="3" class="form-input" placeholder="Langkah instalasi singkat, akun demo, masa garansi revisi, dll.">' + esc(dv.note || '') + '</textarea></div>' +
-      '<button id="caDelivBtn" class="btn-primary !w-auto mt-4" onclick="caDeliver(' + jsArg(r.id) + ')"><i data-lucide="package-check" class="w-4 h-4"></i> ' + (st === 'Selesai' ? 'Perbarui & Kirim Ulang' : 'Kirim ke Customer') + '</button>'));
+  if (st === 'Dikerjakan' || st === 'Selesai' || st === 'Diterima') {
+    // v3.2 — Serah terima memakai form yang sama dengan Produk → Aplikasi (video tutorial, ZIP, dokumen)
+    const dp = r.deliveryProduct, dv = r.delivery || {};
+    const pill = (ok, icon, label) => '<div class="deliv-item' + (ok ? ' is-ok' : '') + '"><i data-lucide="' + icon + '" class="w-4 h-4"></i><span>' + label + '</span></div>';
+    const pack = dp
+      ? '<div class="deliv-grid">' +
+          pill(!!dp.Drive_File_ID, 'file-archive', dp.Drive_File_ID ? 'File ZIP terlampir' : 'Belum ada ZIP') +
+          pill((dp.episodes || []).length > 0, 'play-circle', (dp.episodes || []).length + ' video tutorial') +
+          pill((dp.resources || []).length > 0, 'file-text', (dp.resources || []).length + ' dokumen/materi') +
+          pill(((dp.slidesRaw || []).length + (dp.previewVideosRaw || []).length) > 0, 'images', ((dp.slidesRaw || []).length + (dp.previewVideosRaw || []).length) + ' preview') +
+        '</div><p class="text-xs text-muted mt-3">Customer membukanya seperti aplikasi yang dibeli: menu <b>Kelas Saya</b> atau tombol <b>Buka Aplikasi</b> di halaman pengajuan.</p>'
+      : (dv.fileId ? '<div class="notice"><i data-lucide="info" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Terkirim dengan format lama (ZIP' + (dv.videoUrl ? ' + 1 video' : '') + '). Buat paket lengkap agar customer mendapat tampilan seperti produk Aplikasi.</p></div>'
+                   : '<p class="text-sm text-muted">Siapkan paket seperti membuat produk <b>Aplikasi</b>: file source code (.zip), video tutorial instalasi, dokumen/panduan, serta slide &amp; video preview.</p>');
+    acts.push(card(dp ? 'Paket Serah Terima' : 'Serahkan Aplikasi', 'package-check', pack +
+      '<button id="caDelivBtn" class="btn-primary !w-auto mt-4" onclick="openCustomDelivery(' + jsArg(r.id) + ')"><i data-lucide="' + (dp ? 'pencil' : 'package-plus') + '" class="w-4 h-4"></i> ' +
+        (dp ? 'Ubah Paket (video, ZIP, dokumen)' : 'Buka Form Serah Terima') + '</button>'));
   }
   if (st === 'Selesai') {
     acts.unshift('<div class="notice"><i data-lucide="hourglass" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Aplikasi terkirim ' + esc(timeAgo((r.delivery || {}).at)) + '. Menunggu customer menekan <b>"Oke, Aplikasi Diterima"</b>.</p></div>');
@@ -238,6 +242,28 @@ function caProgress(id) {
   if (!val$('cpNote')) return showToast('Tulis progres', '', 'warning');
   caAct({ id: id, action: 'progress', note: val$('cpNote') }, document.getElementById('caProgBtn'), 'Mengirim…');
 }
+/** Buka form serah terima (sama dengan form Produk → Aplikasi). */
+function openCustomDelivery(id) {
+  const r = (AppState.a.customAdmin.requests || []).filter(x => x.id === id)[0];
+  if (!r) return;
+  CA.dirty = false;
+  openProductForm(r.deliveryProduct ? r.deliveryProduct.Product_ID : null, { custom: r, product: r.deliveryProduct || null });
+}
+async function submitCustomDelivery(r, v) {
+  const note = v._note; delete v._note;
+  Swal.fire({ title: 'Mengirim paket…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+  const res = await api('customUpdate', { id: r.id, action: 'deliver_product', product: v, note: note });
+  Swal.close();
+  if (!res.success) {
+    const again = await Swal.fire({ icon: 'error', title: 'Gagal mengirim', text: res.message, showCancelButton: true, confirmButtonText: 'Perbaiki', cancelButtonText: 'Tutup' });
+    if (again.isConfirmed) openProductForm(null, { custom: r, product: Object.assign({}, r.deliveryProduct || {}, v, { slidesRaw: v.slides, previewVideosRaw: v.previewVideos }) });
+    return;
+  }
+  showToast('Berhasil', res.message, 'success');
+  await Admin.fetch('customAdmin');
+  Admin.fetch('dashboard');
+}
+
 async function caPickZip(id) {
   const f = await pickFile('.zip,application/zip,application/x-zip-compressed');
   if (!f) return;
