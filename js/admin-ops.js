@@ -40,8 +40,13 @@ adminRoute('blast', {
     Admin.load('blastAdmin');
     if (!AppState.a.productsAdmin) Admin.load('productsAdmin');
     syncBlastForm();
+    // v3.3 adaptif: 20 dtk bila ada kampanye berjalan, 90 dtk bila tidak; lebih jarang saat tidak ada interaksi
+    Activity.reset('blast');
     clearInterval(AppState.timers.blast);
-    AppState.timers.blast = setInterval(() => { if (document.visibilityState === 'visible') Admin.fetch('blastAdmin'); }, 20000);
+    AppState.timers.blast = setInterval(() => {
+      const d = AppState.a.blastAdmin, live = !!(d && d.campaigns && d.campaigns.some(c => c.status === 'Running' || c.status === 'Waiting'));
+      if (Activity.due('blast', live ? 20000 : 90000, live ? 60000 : 300000)) Admin.fetch('blastAdmin');
+    }, 10000);
   },
   leave: () => clearInterval(AppState.timers.blast)
 });
@@ -362,6 +367,7 @@ async function submitCsv(btn) {
   Swal.fire({ icon: 'success', title: 'Import CSV selesai', html: '<p>' + d.newUsers + ' member baru · ' + d.newAccess + ' akses baru · ' + d.updatedProfiles + ' profil dilengkapi</p>' +
     (d.errors.length ? '<div class="text-left text-xs mt-3 max-h-52 overflow-auto p-3 rounded-lg bg-surface-2">' + d.errors.map(esc).join('<br>') + '</div>' : '') });
   Store.del(Admin.key('crm'));
+  Admin.fetchMany(['crm', 'dashboard']);             // v3.3: 1 panggilan batch
 }
 
 
@@ -421,7 +427,7 @@ async function saveSettings(btn) {
     banks: AppState.banks.filter(b => b.name && b.number) };
   if (!v.appName) return showToast('Nama wajib diisi', '', 'error');
   const res = await withBusy(btn, 'Menyimpan…', () => api('saveSettings', v));
-  if (toastRes(res)) { Admin.fetch('settingsAdmin'); Public.prefetch(); }
+  if (toastRes(res)) { Admin.fetch('settingsAdmin'); Public.prefetch(true); }
 }
 async function backupNow(btn) {
   const res = await withBusy(btn, 'Membuat backup…', () => api('backup', {}, { timeout: 180000 }));

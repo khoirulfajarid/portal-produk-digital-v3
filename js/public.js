@@ -8,8 +8,13 @@
 const Public = {
   loaded: false,
 
-  /** Muat data publik di latar (dipakai juga untuk logo & Client ID Google). */
-  prefetch() {
+  /**
+   * Muat data publik di latar (dipakai juga untuk logo & Client ID Google).
+   * v3.3: member/admin yang sudah login hanya butuh logo & nama aplikasi → cukup diperbarui tiap 10 menit;
+   * tamu tiap 15 detik (mencegah panggilan kembar). force = setelah Pengaturan disimpan.
+   */
+  prefetch(force) {
+    const fresh = force === true ? 0 : (AppState.role ? 600000 : 15000);
     return swr('pub', 'publicBootstrap', {}, (d, fromCache, changed) => {
       AppState.pub = d;
       rememberBrand(d.settings);
@@ -18,7 +23,7 @@ const Public = {
       if (AppState.currentPage === 'login') Login.initGoogle();
       renderPubnav();
       if (document.body.classList.contains('layout-admin') && typeof renderSidebarBrand === 'function') renderSidebarBrand();
-    }, { toastError: false }).then(res => {
+    }, { toastError: false, fresh: fresh }).then(res => {
       Public.lastError = res && !res.success ? (res.message || 'Server tidak merespons.') : '';
       if (AppState.currentPage === 'login') Login.initGoogle();
       return res;
@@ -346,7 +351,7 @@ const Login = {
     document.getElementById('tabAdmin').classList.toggle('login-tab-active', t === 'admin');
     document.getElementById('formMember').hidden = t !== 'member';
     document.getElementById('formAdmin').hidden = t !== 'admin';
-    if (t === 'admin') this.initGoogle();
+    if (t === 'admin') { this.initGoogle(); warmUpServer('admin'); }   // v3.3: data panel admin disiapkan selagi login Google
   },
   async submitMember(e) {
     e.preventDefault();
@@ -457,6 +462,7 @@ registerPage('login', {
   show: () => {
     document.getElementById('loginBrand').innerHTML = brandLogoHtml(56);
     Login.renderHistory();
+    warmUpServer(Login.tab === 'admin' ? 'admin' : 'pub');   // v3.3: cache akses & katalog siap sebelum tombol Masuk ditekan
     if (Login.tab === 'admin') Login.initGoogle();
   }
 });
@@ -487,6 +493,7 @@ function onMemberLogin(d) {
 // ════════════════════════════════════════════════════════════
 async function openRedeemDialog(prefillEmail) {
   const logged = AppState.role === ROLE_MEMBER;
+  if (!logged) warmUpServer('pub');
   const r = await Swal.fire({
     title: 'Redeem Kode Akses', confirmButtonText: 'Tukarkan Kode', showCancelButton: true, cancelButtonText: 'Batal', focusConfirm: false,
     html: '<div style="text-align:left;display:grid;gap:12px">' +

@@ -13,7 +13,7 @@ const CA_CLOSED = ['Diterima', 'Ditolak', 'Dibatalkan'];
 adminRoute('custom', {
   title: 'Aplikasi Custom',
   template: () => '<div class="page-wrap-fluid">' + adminHead('Aplikasi Custom', 'Pengajuan pembuatan aplikasi Apps Script dari member — penawaran, jadwal, serah terima, hingga pameran.',
-      '<button class="btn-ghost !w-auto" onclick="CA.dirty=false;Admin.fetch(\'customAdmin\')"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
+      '<button class="btn-ghost !w-auto" onclick="CA.dirty=false;withBusy(this,\'Menyegarkan…\',()=>Admin.fetchMany([\'customAdmin\',\'dashboard\'],{_fresh:true}))"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
     '<div id="caKpi" class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">' + '<div class="skeleton h-28"></div>'.repeat(4) + '</div>' +
     '<div class="flex flex-wrap items-center gap-2 mb-4"><div class="seg" id="caTabs">' +
       '<button class="inline-flex items-center justify-center gap-1.5 whitespace-nowrap" data-ctab="list" onclick="caTab(\'list\')"><i data-lucide="inbox" class="w-4 h-4"></i> Pengajuan</button>' +
@@ -209,8 +209,7 @@ async function caAct(payload, btn, label) {
   if (!res.success) { Swal.fire({ icon: 'error', title: 'Gagal', text: res.message }); return null; }
   showToast('Berhasil', res.message, 'success');
   CA.dirty = false;
-  await Admin.fetch('customAdmin');
-  Admin.fetch('dashboard');
+  await Admin.fetchMany(['customAdmin', 'dashboard']);      // v3.3: 1 panggilan batch
   return res;
 }
 const num$ = id => Number((document.getElementById(id) || {}).value || 0);
@@ -260,8 +259,7 @@ async function submitCustomDelivery(r, v) {
     return;
   }
   showToast('Berhasil', res.message, 'success');
-  await Admin.fetch('customAdmin');
-  Admin.fetch('dashboard');
+  await Admin.fetchMany(['customAdmin', 'dashboard']);      // v3.3: 1 panggilan batch
 }
 
 async function caPickZip(id) {

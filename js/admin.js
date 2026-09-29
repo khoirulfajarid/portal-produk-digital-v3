@@ -54,22 +54,35 @@ const Admin = {
     if (this.booted) return;
     this.booted = true;
     Public.prefetch();
+    // v3.3: tunggu pustaka tabel/grafik (halaman Dashboard pun menunggunya) → permintaan halaman yang sedang
+    // dibuka (mis. dashboard + log realtime) dan menu inti tergabung dalam SATU panggilan batch.
+    // Selama itu tampilan sudah terisi dari cache lokal, jadi pengguna tidak menunggu.
+    await AdminLibs.ready();
     const first = await this.prefetch(['dashboard', 'ordersAdmin', 'productsAdmin', 'crm', 'customAdmin']);
     if (!first || !first.success) { this.booted = false; return; }
     const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1500));
     idle(() => this.prefetch(['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin'], true));
+    // Badge menu (pesanan/pendaftar/custom): tiap 90 dtk saat aktif, 5 mnt saat tidak ada interaksi, berhenti saat tab tersembunyi
+    Activity.reset('kpi');
     clearInterval(AppState.timers.kpi);
-    AppState.timers.kpi = setInterval(() => { if (document.visibilityState === 'visible') this.fetch('dashboard'); }, 90000);
+    AppState.timers.kpi = setInterval(() => { if (Activity.due('kpi', 90000, 300000)) this.fetch('dashboard'); }, 30000);
   },
 
   /** Beberapa aksi baca dalam 1 panggilan server. skipFresh: lewati aksi yang cachenya masih segar. */
   async prefetch(actions, skipFresh) {
     const list = skipFresh ? actions.filter(a => !this.isFresh(a, 120000)) : actions;
     if (!list.length) return { success: true };
-    const res = await api('batch', { calls: list.map(a => ({ action: a })) });
-    if (res.success) Object.keys(res.data).forEach(a => { const r = res.data[a]; if (r && r.success) this.ingest(a, r.data); });
-    return res;
+    const all = await this.fetchMany(list);
+    return all.some(r => r && r.success) ? { success: true } : (all[0] || { success: false });
   },
+
+  /** Tombol "Segarkan": ambil ulang dari Sheets (lewati cache server) — menu inti dalam 1 panggilan. */
+  refreshAll() {
+    ['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin', 'accessHistory']
+      .forEach(a => { this.stale[a] = 1; });                  // menu lain: diambil segar dari Sheets saat dibuka
+    return this.fetchMany(['dashboard', 'ordersAdmin', 'productsAdmin', 'crm', 'customAdmin'], { _fresh: true });
+  },
+  stale: {},
 
   key(action) { return userKey('a:' + action); },
   cached(action) { const c = Store.get(this.key(action), null); return c ? c.data : null; },
@@ -87,18 +100,29 @@ const Admin = {
     if (r && changed) r(data);
   },
 
-  /** Ambil data admin dari server (dipakai setelah aksi simpan & tombol Segarkan). */
+  /**
+   * Ambil data admin dari server (dipakai setelah aksi simpan & tombol Segarkan).
+   * v3.3: beberapa Admin.fetch() berurutan (mis. 'ordersAdmin' lalu 'dashboard') otomatis
+   * digabung jadi 1 panggilan batch. payload {_fresh:true} = lewati cache server.
+   */
   async fetch(action, payload) {
-    const res = await api(action, payload || {});
-    if (res.success) this.ingest(action, res.data);
-    return res;
+    const k = apiEpoch() + '|' + action + '|' + JSON.stringify(payload || {});
+    const p = apiQ(action, payload || {}).then(res => { if (res && res.success) this.ingest(action, res.data); return res; });
+    this.pending[k] = p;
+    p.then(() => { if (this.pending[k] === p) delete this.pending[k]; });
+    return p;
   },
+  pending: {},
+  fetchMany(actions, payload) { return Promise.all(actions.map(a => this.fetch(a, payload))); },
 
   /** SWR untuk halaman admin: render dari cache seketika; ke server hanya bila cache > 30 detik. */
   load(action, payload) {
     const c = AppState.a[action] || this.cached(action);
     if (c) { AppState.a[action] = c; const r = ADMIN_RENDER[action]; if (r) r(c); }
+    if (this.stale[action]) { delete this.stale[action]; return this.fetch(action, Object.assign({ _fresh: true }, payload || {})); }
     if (c && this.isFresh(action, 30000)) return Promise.resolve({ success: true, data: c, cached: true });
+    const inFlight = this.pending[apiEpoch() + '|' + action + '|' + JSON.stringify(payload || {})];
+    if (inFlight) return inFlight;                  // sudah diminta (mis. oleh batch pembuka) → tunggu hasil yang sama
     return this.fetch(action, payload);
   }
 };
@@ -174,7 +198,7 @@ function adminRoute(id, def) {
 adminRoute('dashboard', {
   title: 'Dashboard',
   template: () => '<div class="page-wrap-fluid">' + adminHead('Dashboard Analisis', 'Performa platform, kuota harian, dan aktivitas terbaru.',
-      '<button class="btn-ghost !w-auto" onclick="Admin.fetch(\'dashboard\');loadSystemStatus(true)"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
+      '<button class="btn-ghost !w-auto" onclick="withBusy(this,\'Menyegarkan…\',()=>Promise.all([Admin.refreshAll(),loadSystemStatus(true)]))"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
     '<div id="dashKpi" class="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-6">' + '<div class="skeleton h-28"></div>'.repeat(10) + '</div>' +
     '<div id="sysBox" class="mb-6"></div>' +
     '<div class="grid xl:grid-cols-3 gap-6 mb-6">' +
@@ -236,12 +260,17 @@ ADMIN_RENDER.dashboard = function (d) {
   refreshIcons();
 };
 
+/**
+ * Kartu kuota & status sistem. v3.3: salinan lokal < 5 menit dipakai langsung (tanpa ke server);
+ * server pun menyimpan hasilnya 10 menit. Tombol Segarkan (force) selalu menghitung ulang.
+ */
 async function loadSystemStatus(force) {
   const box = document.getElementById('sysBox');
   if (!box) return;
   const c = Admin.cached('systemStatus');
   if (c && !force) renderSystemStatus(c);
   else if (!c) box.innerHTML = '<div class="skeleton h-40"></div>';
+  if (c && !force && Admin.isFresh('systemStatus', 300000)) return;
   const res = await api('systemStatus', { refresh: !!force });
   if (res.success) { Store.set(Admin.key('systemStatus'), { t: Date.now(), data: res.data }); renderSystemStatus(res.data); }
 }
@@ -257,7 +286,14 @@ function renderSystemStatus(s) {
       '<p class="text-xs mt-2">' + statusBadge(wa.deviceStatus === 'connect' ? 'Active' : (wa.deviceStatus || 'unknown')) + ' <span class="text-muted ml-1">' + esc(wa.device) + (wa.expired ? ' · aktif s/d ' + esc(wa.expired) : '') + '</span></p>'
     : '<p class="text-sm" style="color:var(--error)">' + esc(wa.reason || 'Gagal membaca device') + '</p>';
   const trig = s.triggers;
-  box.innerHTML = '<div class="app-card rounded-2xl p-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="gauge" class="w-5 h-5 text-accent"></i> Kuota Harian & Status Sistem</h3>' +
+  const perf = s.perf || {}, props = s.properties || {};
+  const warmLine = trig.keepWarm === undefined ? ''                      // server masih v3.2
+    : '<p class="text-sm">' + (trig.keepWarm ? '✅ Server hangat (1 mnt)' : trig.keepWarmOff ? '⏸️ Warmup dimatikan' : '⚠️ Warmup belum aktif') + '</p>';
+  const sessLine = props.tokenMode === 'hmac'
+    ? 'Sesi: token HMAC' + (props.sessions ? ' · ' + props.sessions + ' sesi lama' : '')
+    : props.sessions + ' sesi aktif';
+  const needTrig = !trig.blastWorker || !trig.maintenance || (trig.keepWarm === false && !trig.keepWarmOff);
+  box.innerHTML ='<div class="app-card rounded-2xl p-6"><div class="flex flex-wrap items-center justify-between gap-2 mb-4"><h3 class="font-semibold text-main inline-flex items-center gap-2"><i data-lucide="gauge" class="w-5 h-5 text-accent"></i> Kuota Harian & Status Sistem</h3>' +
     '<span class="text-xs text-muted">Dicek ' + timeAgo(s.checkedAt) + '</span></div>' +
     '<div class="grid sm:grid-cols-2 xl:grid-cols-5 gap-5">' +
       '<div class="quota"><p class="stat-label">Email (Gmail)</p><p class="text-2xl font-bold text-main">' + s.email.remaining + '</p><p class="text-xs text-muted">sisa penerima hari ini</p>' + bar(100 - Math.min(s.email.remaining, 100)) + '<p class="text-[11px] text-muted mt-1">' + esc(s.email.note) + '</p></div>' +
@@ -266,9 +302,9 @@ function renderSystemStatus(s) {
       '<div class="quota"><p class="stat-label">Database Sheets</p><p class="text-2xl font-bold text-main">' + dbPct.toFixed(2) + '%</p><p class="text-xs text-muted">' + s.database.cells.toLocaleString('id-ID') + ' / 10 juta sel</p>' + bar(dbPct) +
         '<button class="text-xs text-accent mt-1" onclick="showDbDetail()">Detail per sheet</button></div>' +
       '<div class="quota"><p class="stat-label">Otomasi</p>' +
-        '<p class="text-sm mt-1">' + (trig.blastWorker ? '✅' : '⚠️') + ' Pekerja blast (5 mnt)</p><p class="text-sm">' + (trig.maintenance ? '✅' : '⚠️') + ' Perawatan harian</p>' +
-        '<p class="text-xs text-muted mt-1">' + s.properties.sessions + ' sesi aktif · ' + s.blast.running + ' blast berjalan</p>' +
-        (!trig.blastWorker || !trig.maintenance ? '<button class="btn-ghost !w-auto !py-1 !px-2 !text-xs mt-2" onclick="installTriggers(this)">Pasang Trigger</button>' : '') + '</div>' +
+        '<p class="text-sm mt-1">' + (trig.blastWorker ? '✅' : '⚠️') + ' Pekerja blast (5 mnt)</p><p class="text-sm">' + (trig.maintenance ? '✅' : '⚠️') + ' Perawatan harian</p>' + warmLine +
+        '<p class="text-xs text-muted mt-1">' + esc(sessLine) + ' · ' + s.blast.running + ' blast berjalan' + (perf.notifQueue ? ' · ' + perf.notifQueue + ' notifikasi antre' : '') + '</p>' +
+        (needTrig ? '<button class="btn-ghost !w-auto !py-1 !px-2 !text-xs mt-2" onclick="installTriggers(this)">Pasang Trigger</button>' : '') + '</div>' +
     '</div></div>';
   AppState.sys = s;
   refreshIcons();
@@ -287,19 +323,29 @@ async function installTriggers(btn) {
   if (toastRes(res)) loadSystemStatus(true);
 }
 
-/** Pembaruan realtime aktivitas (polling ringan: hanya baris baru). */
+/**
+ * Pembaruan realtime aktivitas (polling ringan: hanya baris baru).
+ * v3.3 adaptif: `ms` saat Anda aktif, 4× lebih jarang (maks. 60 dtk) bila tidak ada interaksi > 2 menit,
+ * berhenti saat tab tersembunyi. Tik pertama ikut tergabung dalam batch pembuka panel.
+ */
 const Live = {
-  since: null, boxId: null, rows: [],
+  since: null, boxId: null, rows: [], busy: false,
   start(boxId, ms) {
     this.boxId = boxId;
+    const active = ms || 10000, idle = Math.max(active * 4, 60000);
+    Activity.reset('live');
     this.tick();
     clearInterval(AppState.timers.live);
-    AppState.timers.live = setInterval(() => { if (document.visibilityState === 'visible') this.tick(); }, ms || 10000);
+    AppState.timers.live = setInterval(() => { if (Activity.due('live', active, idle)) this.tick(); }, Math.min(active, 15000));
   },
   stop() { clearInterval(AppState.timers.live); },
   async tick() {
-    const res = await api('logsSince', { since: this.since || new Date(Date.now() - 7 * 86400000).toISOString() });
-    if (!res.success) return;
+    if (this.busy) return;                         // jaringan lambat: jangan menumpuk permintaan
+    this.busy = true;
+    let res;
+    try { res = await apiQ('logsSince', { since: this.since || new Date(Date.now() - 7 * 86400000).toISOString() }); }
+    finally { this.busy = false; }
+    if (!res || !res.success) return;
     this.since = res.data.serverTime;
     if (res.data.logs.length) { this.rows = res.data.logs.concat(this.rows).slice(0, 60); }
     const box = document.getElementById(this.boxId);

@@ -12,7 +12,8 @@ const OF = { status: 'Pending' };
 
 adminRoute('orders', {
   title: 'Verifikasi Pesanan',
-  template: () => '<div class="page-wrap-fluid">' + adminHead('Verifikasi Pesanan', 'Periksa bukti transfer, lalu setujui atau tolak.') +
+  template: () => '<div class="page-wrap-fluid">' + adminHead('Verifikasi Pesanan', 'Periksa bukti transfer, lalu setujui atau tolak.',
+      '<button class="btn-ghost !w-auto" onclick="withBusy(this,\'Menyegarkan…\',()=>Admin.fetchMany([\'ordersAdmin\',\'dashboard\'],{_fresh:true}))"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>') +
     '<div id="ordKpi" class="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6"></div>' +
     '<div class="app-card rounded-2xl p-5"><div class="flex flex-wrap gap-2 mb-4" id="ordTabs"></div>' +
     '<div class="overflow-x-auto"><table id="tblOrders" class="display w-full"><thead><tr><th>Pesanan</th><th>Member</th><th>Produk</th><th>Nominal</th><th>Channel</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table></div></div></div>',
@@ -58,7 +59,7 @@ async function verifyOrder(id, approve) {
   Swal.fire({ title: 'Memproses…', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
   const res = await api('verifyOrder', { orderId: id, approve: approve, note: approve ? '' : r.value });
   Swal.close();
-  if (toastRes(res)) { Admin.fetch('ordersAdmin'); Admin.fetch('dashboard'); }
+  if (toastRes(res)) Admin.fetchMany(['ordersAdmin', 'dashboard']);          // v3.3: 1 panggilan batch
 }
 
 
@@ -70,6 +71,7 @@ const CF = { tab: 'members', status: 'all', complete: 'all', product: 'all', lea
 adminRoute('crm', {
   title: 'CRM Member',
   template: () => '<div class="page-wrap-fluid">' + adminHead('CRM Member & Non-Member', 'Member = akses portal via redeem/beli. Non-Member = pengunjung Open Access yang bertanya lewat WhatsApp/Email.',
+      '<button class="btn-ghost !w-auto" onclick="withBusy(this,\'Menyegarkan…\',()=>Admin.fetchMany([\'crm\',\'dashboard\'],{_fresh:true}))"><i data-lucide="refresh-cw" class="w-4 h-4"></i> Segarkan</button>' +
       '<button class="btn-ghost !w-auto" onclick="exportCrm()"><i data-lucide="download" class="w-4 h-4"></i> Export CSV</button>' +
       '<button class="btn-primary !w-auto" onclick="openMemberForm()"><i data-lucide="user-plus" class="w-4 h-4"></i> Tambah Member</button>') +
     '<div id="crmKpi" class="grid grid-cols-2 xl:grid-cols-6 gap-4 mb-6"></div>' +
@@ -105,7 +107,7 @@ ADMIN_RENDER.crm = function (d) {
     const rows = m.filter(x => (CF.status === 'all' || x.status === CF.status) && (CF.complete === 'all' || (CF.complete === 'yes') === x.complete) &&
       (CF.product === 'all' || x.productIds.indexOf(CF.product) > -1));
     window._crmRows = rows;
-    box.innerHTML = '<table id="tblCrm" class="display w-full"><thead><tr><th>Member</th><th>WhatsApp</th><th>Produk</th><th>Sumber</th><th>Login Terakhir</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
+    if (!document.getElementById('tblCrm')) box.innerHTML = '<table id="tblCrm" class="display w-full"><thead><tr><th>Member</th><th>WhatsApp</th><th>Produk</th><th>Sumber</th><th>Login Terakhir</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
     buildTable('tblCrm', {
       data: rows, columns: [
         { data: null, render: x => '<div class="cell-user"><div class="cell-avatar">' + esc(initial(x.nickname || x.email)) + '</div><div class="min-w-0"><p class="font-medium text-main">' + esc(x.nickname || '—') +
@@ -124,7 +126,7 @@ ADMIN_RENDER.crm = function (d) {
     CF.regStatus = CF.regStatus || 'Pending';
     document.getElementById('crmFilters').innerHTML = sel('rs', CF.regStatus, [['Pending', 'Menunggu persetujuan'], ['Rejected', 'Ditolak'], ['all', 'Semua']], 'CF.regStatus=this.value;ADMIN_RENDER.crm(AppState.a.crm)');
     const rows = regs.filter(x => CF.regStatus === 'all' || x.status === CF.regStatus);
-    box.innerHTML = '<table id="tblRegs" class="display w-full"><thead><tr><th>Pendaftar</th><th>WhatsApp</th><th>Profesi</th><th>Keperluan</th><th>Mendaftar</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
+    if (!document.getElementById('tblRegs')) box.innerHTML = '<table id="tblRegs" class="display w-full"><thead><tr><th>Pendaftar</th><th>WhatsApp</th><th>Profesi</th><th>Keperluan</th><th>Mendaftar</th><th>Status</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
     buildTable('tblRegs', {
       data: rows, columns: [
         { data: null, render: x => '<div class="cell-user"><div class="cell-avatar">' + esc(initial(x.fullName || x.email)) + '</div><div class="min-w-0"><p class="font-medium text-main">' + esc(x.fullName || x.nickname || '—') + '</p><p class="text-xs text-muted">' + esc(x.email) + '</p></div></div>' },
@@ -142,7 +144,7 @@ ADMIN_RENDER.crm = function (d) {
   } else {
     document.getElementById('crmFilters').innerHTML = sel('ls', CF.leadStatus, [['all', 'Semua status'], ['Baru', 'Baru'], ['Dihubungi', 'Dihubungi'], ['Tertarik', 'Tertarik'], ['Member', 'Jadi Member'], ['Tidak Tertarik', 'Tidak Tertarik']], 'CF.leadStatus=this.value;ADMIN_RENDER.crm(AppState.a.crm)');
     const rows = l.filter(x => CF.leadStatus === 'all' || x.status === CF.leadStatus);
-    box.innerHTML = '<table id="tblLeads" class="display w-full"><thead><tr><th>Nama</th><th>Kontak</th><th>Minat</th><th>Via</th><th>Masuk</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
+    if (!document.getElementById('tblLeads')) box.innerHTML = '<table id="tblLeads" class="display w-full"><thead><tr><th>Nama</th><th>Kontak</th><th>Minat</th><th>Via</th><th>Masuk</th><th>Status</th><th>Catatan</th><th>Aksi</th></tr></thead><tbody></tbody></table>';
     buildTable('tblLeads', {
       data: rows, columns: [
         { data: 'name', render: v => '<b class="text-main">' + esc(v) + '</b>' },
@@ -176,7 +178,7 @@ async function approveReg(id, approve) {
   u.status = approve ? 'Active' : 'Rejected'; ADMIN_RENDER.crm(d);           // optimistic
   const res = await api('approveRegistration', { id: id, approve: approve, reason: approve ? '' : (r.value || '') });
   if (!toastRes(res)) u.status = 'Pending';
-  Admin.fetch('crm'); Admin.fetch('dashboard');
+  Admin.fetchMany(['crm', 'dashboard']);
 }
 
 function exportCrm() {
@@ -275,7 +277,7 @@ adminRoute('access', {
       GA.selected = []; renderGrantPool(); renderGrantDrop();
     });
   },
-  show: () => { Admin.load('crm'); loadAccessHistory(); }
+  show: () => { Admin.load('crm'); loadAccessHistory(); }            // v3.3: keduanya tergabung dalam 1 panggilan
 });
 
 const _crmRenderBase = ADMIN_RENDER.crm;
@@ -318,7 +320,7 @@ function updateGrantBtn() {
 }
 async function submitGrant() {
   const res = await withBusy(document.getElementById('gaBtn'), 'Memberikan akses…', () => api('grantBulk', { emails: GA.dropped, productIds: GA.picked }));
-  if (toastRes(res)) { GA.dropped = []; GA.picked = []; Admin.fetch('crm'); loadAccessHistory(); }
+  if (toastRes(res)) { GA.dropped = []; GA.picked = []; Admin.fetch('crm'); loadAccessHistory(true); }
 }
 
 async function openAssignModal(email) {
@@ -333,25 +335,24 @@ async function openAssignModal(email) {
   });
   if (!r.isConfirmed) return;
   const res = await api('grantBulk', { emails: [email], productIds: r.value });
-  if (toastRes(res)) { Admin.fetch('crm'); loadAccessHistory(); }
+  if (toastRes(res)) { Admin.fetch('crm'); loadAccessHistory(true); }
 }
 
-async function loadAccessHistory() {
-  const render = list => {
-    if (!document.getElementById('tblAccess')) return;
+/** Riwayat pemberian akses. force = setelah aksi tulis (selalu ambil dari server). */
+function loadAccessHistory(force) { return force ? Admin.fetch('accessHistory') : Admin.load('accessHistory'); }
+ADMIN_RENDER.accessHistory = function (list) {
+    if (!document.getElementById('tblAccess') || !list) return;
     buildTable('tblAccess', { data: list, columns: [
       { data: 'email' }, { data: 'product' }, { data: 'by' },
       { data: 'at', render: (v, t) => t === 'display' ? fmtDateTime(v) : v },
       { data: null, orderable: false, render: a => '<button class="btn-icon" title="Cabut akses" onclick="revokeAccess(' + jsArg(a.id) + ')"><i data-lucide="user-minus" class="w-4 h-4"></i></button>' }
     ] });
-  };
-  swr(Admin.key('accessHistory'), 'accessHistory', {}, render);
-}
+};
 async function revokeAccess(id) {
   const r = await Swal.fire({ title: 'Cabut akses ini?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Cabut', cancelButtonText: 'Batal' });
   if (!r.isConfirmed) return;
   const res = await api('revokeAccess', { accessId: id });
-  if (toastRes(res)) { loadAccessHistory(); Admin.fetch('crm'); }
+  if (toastRes(res)) { loadAccessHistory(true); Admin.fetch('crm'); }
 }
 
 

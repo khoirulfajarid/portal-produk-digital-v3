@@ -1,10 +1,14 @@
 /**
  * ============================================================
- * DIGITAL PRODUCT HUB v3.0 — core.js
+ * DIGITAL PRODUCT HUB v3.3 — core.js
  * State, API (fetch ke GAS), cache SWR (localStorage), router SPA,
  * utilitas UI. Semua halaman dirender di klien → pindah menu 0 ms.
+ * v3.3: permintaan baca kembar digabung, beberapa aksi baca dalam 1 tik → 1 panggilan batch,
+ *       antrean notifikasi dikirim di latar ('drain'), warmup server per lingkup,
+ *       polling adaptif (lebih jarang saat tidak ada interaksi).
  * ============================================================
  */
+const FRONT_VERSION = '3.3';
 
 // ════════════════════════════════════════════════════════════
 // 1. STATE
@@ -49,20 +53,28 @@ function userKey(k) { return 'u:' + (AppState.email || 'anon') + ':' + k; }
 // 3. API — fetch POST ke GAS (text/plain → tanpa CORS preflight)
 // ════════════════════════════════════════════════════════════
 /** Aksi baca (aman diulang otomatis bila jaringan HP putus-sambung). Aksi tulis TIDAK diulang. */
-const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin)$/;
+const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin|batch)$/;
 let _slowToastAt = 0;
 
 /**
  * Pengukur performa (gas-instant-ux-pro · Prinsip 0).
  * Ketik Perf.table() di console browser: total = waktu yang dirasakan, server = kerja Apps Script, net = jaringan + cold start.
+ * Perf.summary() = rata-rata per aksi. Kolom cache = jawaban dari cache server (tanpa membaca Sheets).
  */
 const Perf = {
-  rows: [],
-  add(action, total, server) {
-    this.rows.push({ action, total, server: server == null ? null : server, net: server == null ? null : total - server, at: new Date().toLocaleTimeString() });
+  rows: [], server: null,
+  add(action, total, server, cached) {
+    this.rows.push({ action, total, server: server == null ? null : server, net: server == null ? null : total - server, cache: cached ? '✓' : '', at: new Date().toLocaleTimeString() });
     if (this.rows.length > 200) this.rows.shift();
   },
-  table() { console.table(this.rows.slice(-40)); return this.rows.length + ' panggilan tercatat'; }
+  table() { console.table(this.rows.slice(-40)); return this.rows.length + ' panggilan tercatat · server v' + (this.server || '?') + ' · frontend v' + FRONT_VERSION; },
+  summary() {
+    const m = {};
+    this.rows.forEach(r => { const k = r.action.split(':')[0]; const x = m[k] || (m[k] = { panggilan: 0, total: 0, server: 0 }); x.panggilan++; x.total += r.total; x.server += r.server || 0; });
+    const out = {};
+    Object.keys(m).forEach(k => { out[k] = { panggilan: m[k].panggilan, 'rata total (ms)': Math.round(m[k].total / m[k].panggilan), 'rata server (ms)': Math.round(m[k].server / m[k].panggilan) }; });
+    console.table(out); return 'server v' + (this.server || '?') + ' · frontend v' + FRONT_VERSION;
+  }
 };
 window.Perf = Perf;
 
@@ -84,8 +96,15 @@ async function apiOnce(action, data, opts) {
       body: JSON.stringify({ action: action, token: AppState.token || '', data: data || {} })
     });
     const text = await res.text();
-    try { const j = JSON.parse(text); Perf.add(action, Math.round(performance.now() - t0), j.ms); return j; }
-    catch (e) {
+    let j;
+    try { j = JSON.parse(text); }
+    catch (e) { j = null; }
+    if (j) {
+      Perf.add(opts.label || action, Math.round(performance.now() - t0), j.ms, j.cached);
+      if (j.v) Perf.server = j.v;
+      if (j.nq > 0 && action !== 'drain') scheduleDrain();      // v3.3: email/WA dikirim di latar, bukan saat Anda menunggu
+      return j;
+    } else {
       // GAS kadang membalas halaman "server sibuk" sesaat → boleh dicoba ulang
       return { success: false, network: true, retryable: res.status >= 500 || res.status === 429,
         message: 'Server membalas HTTP ' + res.status + ' berupa halaman, bukan data JSON. Biasanya URL /exec salah, deployment sudah dihapus, atau akses Web App belum "Anyone".' };
@@ -97,12 +116,30 @@ async function apiOnce(action, data, opts) {
   } finally { clearTimeout(timer); }
 }
 
+/**
+ * Permintaan baca yang sedang berjalan: permintaan identik ikut menunggu hasil yang sama (tidak dikirim 2×).
+ * _writeEpoch naik setiap aksi tulis dikirim → baca SETELAH simpan tidak pernah menumpang baca lama (data selalu segar).
+ */
+const _inflight = {};
+let _writeEpoch = 0;
+function apiEpoch() { return _writeEpoch; }
+
 async function api(action, data, opts) {
   opts = opts || {};
   if (!window.GAS_URL || GAS_URL.indexOf('PASTE_') === 0) {
     return { success: false, message: 'GAS_URL belum diisi di js/config.js' };
   }
   const isRead = READ_ACTIONS.test(action);
+  if (!isRead) { _writeEpoch++; return apiRun(action, data, opts, false); }
+  const k = _writeEpoch + '|' + action + '|' + (AppState.token || '') + '|' + JSON.stringify(data || {});
+  if (_inflight[k]) return _inflight[k];
+  const p = apiRun(action, data, opts, true);
+  _inflight[k] = p;
+  p.then(() => { delete _inflight[k]; }, () => { delete _inflight[k]; });
+  return p;
+}
+
+async function apiRun(action, data, opts, isRead) {
   const tries = opts.retries !== undefined ? opts.retries + 1 : (isRead ? 3 : 1);
   let res;
   for (let i = 0; i < tries; i++) {
@@ -112,7 +149,7 @@ async function api(action, data, opts) {
       if (navigator.onLine === false) await waitOnline(15000);
     }
     // Percobaan pertama lebih singkat agar cepat pulih dari "server dingin" di HP
-    res = await apiOnce(action, data, { timeout: opts.timeout || (isRead ? (i === 0 ? 25000 : 40000) : 90000) });
+    res = await apiOnce(action, data, { timeout: opts.timeout || (action === 'batch' ? 60000 : isRead ? (i === 0 ? 25000 : 40000) : 90000), label: opts.label });
     if (res.success || !res.retryable) break;
   }
   if (!res.success && res.network && !isRead) res.message += ' Periksa koneksi lalu coba lagi.';
@@ -129,15 +166,103 @@ function waitOnline(ms) {
   });
 }
 
-/** Pemanasan server: GET ringan saat app dibuka (mengurangi "cold start" GAS di HP). */
-function warmUpServer() {
+/**
+ * Pemanasan server (v3.3): GET ringan ?w=pub|admin → server menyiapkan cache SEBELUM tombol ditekan
+ * (mis. saat form login dibuka / tab Superadmin dipilih). Tidak mengembalikan data; maks. 1× per 4 menit per lingkup.
+ */
+function warmUpServer(scope) {
+  scope = scope === 'admin' ? 'admin' : 'pub';
   try {
-    const last = +sessionStorage.getItem('dph3:warm') || 0;
+    const last = +sessionStorage.getItem('dph3:warm:' + scope) || 0;
     if (Date.now() - last < 240000 || !window.GAS_URL || GAS_URL.indexOf('PASTE_') === 0) return;
-    sessionStorage.setItem('dph3:warm', String(Date.now()));
+    sessionStorage.setItem('dph3:warm:' + scope, String(Date.now()));
   } catch (e) { /* */ }
-  fetch(GAS_URL + '?ping=' + Date.now(), { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
+  fetch(GAS_URL + '?w=' + scope + '&t=' + Date.now(), { mode: 'no-cors', cache: 'no-store' }).catch(() => {});
 }
+
+/**
+ * v3.3 — Antrean notifikasi: server membalas res.nq = jumlah email/WA yang diantrekan.
+ * Browser lalu memanggil 'drain' di latar (tanpa ditunggu). Bila gagal/halaman ditutup,
+ * trigger keepWarm (1 menit) di server tetap mengirimnya.
+ */
+let _drainT = 0, _drainRuns = 0;
+function scheduleDrain() {
+  clearTimeout(_drainT);
+  _drainT = setTimeout(async () => {
+    const t0 = performance.now();
+    try {
+      const res = await fetch(GAS_URL, { method: 'POST', redirect: 'follow', cache: 'no-store',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'drain', token: '', data: {} }) });
+      const j = await res.json();
+      Perf.add('drain', Math.round(performance.now() - t0), j.ms);
+      if (j && j.success && j.data && j.data.left > 0 && ++_drainRuns < 4) scheduleDrain();
+      else _drainRuns = 0;
+    } catch (e) { _drainRuns = 0; /* keepWarm di server akan mengirimnya */ }
+  }, 400);
+}
+
+/**
+ * v3.3 — Penggabung panggilan baca: semua apiQ() dalam tik yang sama → SATU panggilan 'batch'
+ * (maks. 10 aksi). Contoh: setelah menyetujui pesanan, "ordersAdmin + dashboard" = 1 eksekusi server.
+ * @return Promise hasil per aksi, bentuknya sama dengan api().
+ */
+const Batcher = {
+  q: null,
+  add(action, data) {
+    return new Promise(resolve => {
+      if (!this.q) { this.q = []; setTimeout(() => this.flush(), 0); }
+      this.q.push({ action: action, data: data || {}, resolve: resolve });
+    });
+  },
+  flush() {
+    const q = this.q || []; this.q = null;
+    const groups = [], idx = {};
+    q.forEach(it => {
+      const k = it.action + '|' + JSON.stringify(it.data);
+      if (!idx[k]) { idx[k] = { action: it.action, data: it.data, list: [] }; groups.push(idx[k]); }
+      idx[k].list.push(it.resolve);
+    });
+    // server mengembalikan hasil per NAMA aksi → aksi sama dengan data berbeda dipisah ke panggilan lain
+    const rounds = [];
+    groups.forEach(g => {
+      let r = rounds.filter(x => x.length < 10 && !x.some(y => y.action === g.action))[0];
+      if (!r) { r = []; rounds.push(r); }
+      r.push(g);
+    });
+    rounds.forEach(async r => {
+      if (r.length === 1) { const res = await api(r[0].action, r[0].data); r[0].list.forEach(fn => fn(res)); return; }
+      const res = await api('batch', { calls: r.map(g => ({ action: g.action, data: g.data })) }, { label: 'batch:' + r.map(g => g.action).join('+') });
+      r.forEach(g => {
+        const one = res.success ? (res.data[g.action] || { success: false, message: 'Tidak ada jawaban untuk ' + g.action }) : res;
+        g.list.forEach(fn => fn(one));
+      });
+    });
+  }
+};
+function apiQ(action, data) { return Batcher.add(action, data); }
+
+/**
+ * v3.3 — Polling adaptif: jeda normal saat Anda aktif, lebih jarang bila tidak ada interaksi
+ * > 2 menit, berhenti saat tab disembunyikan. Mengurangi beban server tanpa terasa bagi pengguna.
+ */
+const Activity = {
+  at: Date.now(), last: {},
+  init() {
+    const mark = () => { this.at = Date.now(); };
+    ['pointerdown', 'keydown', 'wheel', 'touchstart', 'focus'].forEach(ev => window.addEventListener(ev, mark, { passive: true }));
+  },
+  idle() { return Date.now() - this.at > 120000; },
+  /** true bila tugas `key` sudah waktunya dijalankan lagi. */
+  due(key, activeMs, idleMs) {
+    if (document.visibilityState !== 'visible') return false;
+    const gap = Date.now() - (this.last[key] || 0);
+    if (gap < (this.idle() ? idleMs : activeMs) - 500) return false;
+    this.last[key] = Date.now();
+    return true;
+  },
+  reset(key) { this.last[key] = Date.now(); }
+};
+Activity.init();
 
 /** Muat skrip/CSS eksternal sesuai kebutuhan (lib admin tidak membebani HP member). */
 const _loaded = {};
@@ -660,7 +785,7 @@ function hideLoadingOverlay() {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(Store.get('theme', 'light'));
   loadSession();
-  warmUpServer();
+  if (!AppState.role) warmUpServer('pub');           // tamu: siapkan cache login/redeem. Member/admin: panggilan data di bawah sudah memanaskan server
   window.addEventListener('hashchange', route);
   if (AppState.role === ROLE_ADMIN) {
     AdminLibs.ready();
@@ -681,7 +806,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let hiddenAt = 0;
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') hiddenAt = Date.now();
-    else if (hiddenAt && Date.now() - hiddenAt > 120000) { warmUpServer(); refreshCurrent(); }
+    else if (hiddenAt && Date.now() - hiddenAt > 120000) { if (!AppState.role) warmUpServer('pub'); refreshCurrent(); }
   });
 });
 
