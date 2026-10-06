@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * DIGITAL PRODUCT HUB v3.3 — core.js
+ * DIGITAL PRODUCT HUB v3.4 — core.js
  * State, API (fetch ke GAS), cache SWR (localStorage), router SPA,
  * utilitas UI. Semua halaman dirender di klien → pindah menu 0 ms.
  * v3.3: permintaan baca kembar digabung, beberapa aksi baca dalam 1 tik → 1 panggilan batch,
@@ -8,7 +8,7 @@
  *       polling adaptif (lebih jarang saat tidak ada interaksi).
  * ============================================================
  */
-const FRONT_VERSION = '3.3';
+const FRONT_VERSION = '3.4';
 
 // ════════════════════════════════════════════════════════════
 // 1. STATE
@@ -53,7 +53,7 @@ function userKey(k) { return 'u:' + (AppState.email || 'anon') + ':' + k; }
 // 3. API — fetch POST ke GAS (text/plain → tanpa CORS preflight)
 // ════════════════════════════════════════════════════════════
 /** Aksi baca (aman diulang otomatis bila jaringan HP putus-sambung). Aksi tulis TIDAK diulang. */
-const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin|batch)$/;
+const READ_ACTIONS = /^(publicBootstrap|memberBootstrap|session|productDetail|checkoutInfo|dashboard|systemStatus|productsAdmin|ordersAdmin|crm|accessHistory|keysAdmin|helpdeskAdmin|announcementsAdmin|showcaseAdmin|bootcampsAdmin|notifConfig|blastAdmin|blastPreview|blastQueue|logs|logsSince|settingsAdmin|customAdmin|batch|bootcampCheckToken|bootcampParticipants|guidesAdmin)$/;
 let _slowToastAt = 0;
 
 /**
@@ -278,7 +278,7 @@ function loadScript(src, ordered) {
 /** Modul panel Superadmin dimuat hanya untuk Superadmin (HP member tidak mengunduhnya). */
 const AdminBundle = {
   p: null, loaded: false,
-  files: ['js/admin.js', 'js/admin-people.js', 'js/admin-content.js', 'js/admin-ops.js', 'js/admin-custom.js'],
+  files: ['js/admin.js', 'js/admin-people.js', 'js/admin-content.js', 'js/admin-ops.js', 'js/admin-custom.js', 'js/admin-bootcamp.js', 'js/admin-karya.js'],
   ready() {
     if (this.p) return this.p;
     const v = (document.querySelector('script[src^="js/core.js"]') || {}).src || '';
@@ -486,13 +486,18 @@ function fmtBytes(b) { b = Number(b) || 0; if (b < 1024) return b + ' B'; const 
 function initial(t) { return String(t || '?').trim().charAt(0).toUpperCase() || '?'; }
 function debounce(fn, ms) { let t; return function () { const a = arguments; clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms || 250); }; }
 function toInputDate(iso) { if (!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toISOString().slice(0, 10); }
-function waLink(wa, text) { const n = String(wa || '').replace(/^0/, '62'); return 'https://wa.me/' + n + (text ? '?text=' + encodeURIComponent(text) : ''); }
-function isValidWa(v) { return /^08[1-9][0-9]{7,11}$/.test(String(v || '').replace(/[\s\-]/g, '')); }
+function waLink(wa, text) { const n = String(wa || '').replace(/^0/, '62').replace(/\D/g, ''); return 'https://wa.me/' + n + (text ? '?text=' + encodeURIComponent(text) : ''); }
+/** v3.4: nomor Indonesia 08… ATAU luar negeri +kode negara (8–15 digit). Sama dengan validasi server. */
+function isValidWa(v) { return /^(08[1-9][0-9]{7,11}|\+[1-9][0-9]{7,14})$/.test(String(v || '').replace(/[\s\-]/g, '')); }
 function normWa(v) {
   let s = String(v || '').replace(/[\s\-().]/g, '');
+  if (s.indexOf('00') === 0 && s.length > 10) s = '+' + s.slice(2);
   if (s.indexOf('+62') === 0) s = '0' + s.slice(3); else if (s.indexOf('62') === 0 && s.length >= 11) s = '0' + s.slice(2);
+  else if (/^8[1-9][0-9]{7,11}$/.test(s)) s = '0' + s;
   return s;
 }
+const WA_HINT = 'Contoh 087818485245. Nomor luar negeri: awali dengan + dan kode negara, mis. +60 12 345 6789.';
+const WA_INVALID = 'No. WhatsApp tidak valid. ' + WA_HINT;
 
 const CAT_LABEL = { 'Kelas': 'Kelas', 'Aplikasi': 'Aplikasi', 'Document': 'Dokumen', 'AI Link': 'AI Link', 'Video Series': 'Kelas' };
 function catLabel(c) { return CAT_LABEL[c] || c; }

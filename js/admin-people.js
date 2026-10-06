@@ -202,14 +202,14 @@ async function openMemberForm(id) {
       '<div><label class="form-label">Email *</label><input id="mfEmail" type="email" class="form-input" value="' + esc(m ? m.email : '') + '">' +
       (m ? '<p class="text-xs text-muted mt-1">Mengganti email akan memindahkan seluruh akses & pesanan ke email baru.</p>' : '') + '</div>' +
       '<div><label class="form-label">Nama Panggilan</label><input id="mfNick" class="form-input" value="' + esc(m ? m.nickname : '') + '"></div>' +
-      '<div><label class="form-label">No. WhatsApp</label><input id="mfWa" class="form-input" inputmode="numeric" placeholder="087818485245" value="' + esc(m ? m.whatsapp : '') + '"></div>' +
+      '<div><label class="form-label">No. WhatsApp</label><input id="mfWa" class="form-input" inputmode="tel" placeholder="0878… atau +60…" value="' + esc(m ? m.whatsapp : '') + '"></div>' +
       (m ? '' : '<div><label class="form-label">Langsung beri akses (opsional)</label><div class="product-picker">' + d.products.map(p =>
         '<label class="picker-row"><input type="checkbox" value="' + esc(p.id) + '" class="mfProd"><span class="text-sm">' + esc(p.title) + '</span><span class="badge ' + badgeClassFor(p.category) + ' ml-auto">' + esc(catLabel(p.category)) + '</span></label>').join('') + '</div></div>') + '</div>',
     preConfirm: () => {
       const email = document.getElementById('mfEmail').value.trim().toLowerCase();
       const wa = normWa(document.getElementById('mfWa').value);
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return Swal.showValidationMessage('Email tidak valid.');
-      if (wa && !isValidWa(wa)) return Swal.showValidationMessage('WA wajib format 08xxxxxxxxxx.');
+      if (wa && !isValidWa(wa)) return Swal.showValidationMessage(WA_INVALID);
       return { id: m ? m.id : '', email: email, nickname: document.getElementById('mfNick').value.trim(), whatsapp: wa,
         productIds: Array.from(document.querySelectorAll('.mfProd:checked')).map(c => c.value) };
     }

@@ -1,7 +1,7 @@
 /**
  * ============================================================
- * admin-content.js — Pameran Karya, Bootcamp, Pengumuman Popup,
- * Helpdesk (Master Kategori + Artikel)
+ * admin-content.js — Pengumuman Popup, Helpdesk (Master Kategori + Artikel)
+ * + helper bersama (field gambar, pilihan produk, konfirmasi hapus)
  * ============================================================
  */
 
@@ -43,116 +43,7 @@ async function confirmDelete(what, action, id, reload) {
 }
 
 
-// ════════════════════════════════════════════════════════════
-// PAMERAN KARYA MEMBER (Point 3)
-// ════════════════════════════════════════════════════════════
-adminRoute('showcase', {
-  title: 'Pameran Karya',
-  template: () => '<div class="page-wrap-fluid">' + adminHead('Pameran Karya Member', 'Karya terbaik member — tampil di Beranda member & halaman Open Access.',
-    '<button class="btn-primary !w-auto" onclick="openShowcaseForm()"><i data-lucide="plus" class="w-4 h-4"></i> Tambah Karya</button>') +
-    '<div id="scGrid" class="grid sm:grid-cols-2 xl:grid-cols-4 gap-6">' + skeletonCards(4) + '</div></div>',
-  show: () => { Admin.load('showcaseAdmin'); if (!AppState.a.productsAdmin) Admin.load('productsAdmin'); }
-});
-
-ADMIN_RENDER.showcaseAdmin = function (list) {
-  const box = document.getElementById('scGrid');
-  if (!box) return;
-  box.innerHTML = list.length ? list.map(s => '<article class="product-card"><div class="product-thumb">' + img(s.image, s.title, '', 'Karya') +
-    '<span class="owned-badge" style="background:' + (s.status === 'Published' ? 'var(--success)' : '#64748B') + '">' + esc(s.status) + '</span></div>' +
-    '<div class="p-4 flex flex-col flex-1"><p class="font-semibold text-main line-clamp-2">' + (s.featured ? '⭐ ' : '') + esc(s.title) + '</p>' +
-    '<p class="text-xs text-muted mt-1">' + esc(s.memberName || '—') + ' · urutan ' + (s.sort || '-') + '</p>' +
-    '<div class="flex gap-2 mt-auto pt-4"><button class="btn-ghost flex-1 !py-2" onclick="openShowcaseForm(' + jsArg(s.id) + ')"><i data-lucide="pencil" class="w-4 h-4"></i> Ubah</button>' +
-    '<button class="btn-icon !w-10 !h-10" onclick="confirmDelete(\'karya\',\'deleteShowcase\',' + jsArg(s.id) + ',\'showcaseAdmin\')"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div></article>').join('')
-    : '<div class="sm:col-span-2 xl:col-span-4">' + emptyState('trophy', 'Belum ada karya', 'Tambahkan karya terbaik member untuk dipamerkan.') + '</div>';
-  refreshIcons();
-};
-
-async function openShowcaseForm(id) {
-  const s = id ? (AppState.a.showcaseAdmin || []).filter(x => x.id === id)[0] : null;
-  const r = await Swal.fire({
-    title: s ? 'Ubah Karya' : 'Tambah Karya', width: 760, showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal', focusConfirm: false,
-    html: '<div class="pform">' +
-      '<div class="grid2"><div><label class="form-label">Judul Karya *</label><input id="scTitle" class="form-input" value="' + esc(s ? s.title : '') + '"></div>' +
-      '<div><label class="form-label">Nama Member</label><input id="scMember" class="form-input" value="' + esc(s ? s.memberName : '') + '"></div></div>' +
-      '<div><label class="form-label">Deskripsi</label><textarea id="scDesc" class="form-input" rows="3">' + esc(s ? s.description : '') + '</textarea></div>' +
-      imageField('scImg', 'Gambar Karya', s && s.imageFileId, s && s.imageUrl) +
-      '<div class="grid2"><div><label class="form-label">Video YouTube (opsional)</label><input id="scVideo" class="form-input" value="' + esc(s ? s.videoUrl : '') + '" placeholder="https://youtu.be/…"></div>' +
-      '<div><label class="form-label">Link Demo (opsional)</label><input id="scDemo" class="form-input" value="' + esc(s ? s.demoUrl : '') + '" placeholder="https://…"></div></div>' +
-      '<div class="grid3"><div><label class="form-label">Hasil dari Kelas</label><select id="scProd" class="form-input">' + productOptions(s && s.productId) + '</select></div>' +
-      '<div><label class="form-label">Urutan</label><input id="scSort" type="number" class="form-input" value="' + (s && s.sort ? s.sort : '') + '"></div>' +
-      '<div><label class="form-label">Status</label><select id="scStatus" class="form-input"><option value="Published"' + (!s || s.status === 'Published' ? ' selected' : '') + '>Tampilkan</option><option value="Draft"' + (s && s.status === 'Draft' ? ' selected' : '') + '>Draft</option></select></div></div>' +
-      '<label class="switch"><input type="checkbox" id="scFeat"' + (s && s.featured ? ' checked' : '') + '><span></span> Karya unggulan (tampil paling depan)</label></div>',
-    didOpen: () => { refreshImageField('scImg'); refreshIcons(); },
-    preConfirm: () => {
-      const v = { id: s ? s.id : '', title: document.getElementById('scTitle').value.trim(), memberName: document.getElementById('scMember').value.trim(),
-        description: document.getElementById('scDesc').value.trim(), imageFileId: IMG.scImg.fileId, imageUrl: IMG.scImg.fileId ? '' : IMG.scImg.url,
-        videoUrl: document.getElementById('scVideo').value.trim(), demoUrl: document.getElementById('scDemo').value.trim(), productId: document.getElementById('scProd').value,
-        sort: Number(document.getElementById('scSort').value) || 0, status: document.getElementById('scStatus').value, featured: document.getElementById('scFeat').checked };
-      if (v.title.length < 3) return Swal.showValidationMessage('Judul minimal 3 karakter.');
-      if (!v.imageFileId && !v.imageUrl && !v.videoUrl) return Swal.showValidationMessage('Isi gambar atau video karya.');
-      return v;
-    }
-  });
-  if (!r.isConfirmed) return;
-  if (toastRes(await api('saveShowcase', r.value))) Admin.fetch('showcaseAdmin');
-}
-
-
-// ════════════════════════════════════════════════════════════
-// BOOTCAMP (CTA Lynk.id di halaman Open Access)
-// ════════════════════════════════════════════════════════════
-adminRoute('bootcamps', {
-  title: 'Bootcamp',
-  template: () => '<div class="page-wrap-fluid">' + adminHead('Kelas / Bootcamp', 'Acara yang dipamerkan di halaman Open Access lengkap dengan tombol CTA ke Lynk.id.',
-    '<button class="btn-ghost !w-auto" onclick="openLink(location.pathname + \'#/explore\')"><i data-lucide="globe" class="w-4 h-4"></i> Lihat Halaman Publik</button>' +
-    '<button class="btn-primary !w-auto" onclick="openBootcampForm()"><i data-lucide="plus" class="w-4 h-4"></i> Tambah Bootcamp</button>') +
-    '<div id="bcGrid" class="grid sm:grid-cols-2 xl:grid-cols-3 gap-6">' + skeletonCards(3) + '</div></div>',
-  show: () => { Admin.load('bootcampsAdmin'); if (!AppState.a.productsAdmin) Admin.load('productsAdmin'); }
-});
-
-ADMIN_RENDER.bootcampsAdmin = function (list) {
-  const box = document.getElementById('bcGrid');
-  if (!box) return;
-  box.innerHTML = list.length ? list.map(b => '<article class="product-card"><div class="product-thumb">' + img(b.poster, b.title, '', 'Bootcamp') +
-    '<span class="owned-badge" style="background:' + (b.status === 'Published' ? 'var(--success)' : '#64748B') + '">' + esc(b.status) + '</span></div>' +
-    '<div class="p-4 flex flex-col flex-1"><p class="font-semibold text-main">' + esc(b.title) + '</p><p class="text-xs text-muted mt-1">' + esc(b.schedule || '—') + '</p>' +
-    '<p class="text-xs mt-2">' + (b.ctaUrl ? '<span class="badge badge-success">CTA: ' + esc(b.ctaLabel) + '</span>' : '<span class="badge badge-warning">CTA belum diisi</span>') + '</p>' +
-    '<div class="flex gap-2 mt-auto pt-4"><button class="btn-ghost flex-1 !py-2" onclick="openBootcampForm(' + jsArg(b.id) + ')"><i data-lucide="pencil" class="w-4 h-4"></i> Ubah</button>' +
-    '<button class="btn-icon !w-10 !h-10" onclick="confirmDelete(\'bootcamp\',\'deleteBootcamp\',' + jsArg(b.id) + ',\'bootcampsAdmin\')"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></div></article>').join('')
-    : '<div class="sm:col-span-2 xl:col-span-3">' + emptyState('calendar-days', 'Belum ada bootcamp', 'Tambahkan kelas/bootcamp yang akan diadakan.') + '</div>';
-  refreshIcons();
-};
-
-async function openBootcampForm(id) {
-  const b = id ? (AppState.a.bootcampsAdmin || []).filter(x => x.id === id)[0] : null;
-  const r = await Swal.fire({
-    title: b ? 'Ubah Bootcamp' : 'Tambah Bootcamp', width: 760, showCancelButton: true, confirmButtonText: 'Simpan', cancelButtonText: 'Batal', focusConfirm: false,
-    html: '<div class="pform">' +
-      '<div><label class="form-label">Judul *</label><input id="bcTitle" class="form-input" value="' + esc(b ? b.title : '') + '"></div>' +
-      '<div class="grid2"><div><label class="form-label">Jadwal</label><input id="bcSched" class="form-input" value="' + esc(b ? b.schedule : '') + '" placeholder="Sabtu, 12 Okt 2026 · 19.00 WIB (Zoom)"></div>' +
-      '<div><label class="form-label">Kelas terkait (opsional)</label><select id="bcProd" class="form-input">' + productOptions(b && b.productId) + '</select></div></div>' +
-      '<div><label class="form-label">Deskripsi</label><textarea id="bcDesc" class="form-input" rows="4">' + esc(b ? b.description : '') + '</textarea></div>' +
-      imageField('bcImg', 'Poster', b && b.posterFileId, b && b.posterUrl) +
-      '<div class="grid2"><div><label class="form-label">Label Harga</label><input id="bcPrice" class="form-input" value="' + esc(b ? b.priceLabel : '') + '" placeholder="Rp 99.000 · Early bird"></div>' +
-      '<div><label class="form-label">Label Kuota</label><input id="bcQuota" class="form-input" value="' + esc(b ? b.quotaLabel : '') + '" placeholder="Sisa 20 kursi"></div></div>' +
-      '<div class="grid2"><div><label class="form-label">Teks Tombol CTA</label><input id="bcCta" class="form-input" value="' + esc(b ? b.ctaLabel : 'Daftar Sekarang') + '"></div>' +
-      '<div><label class="form-label">Link CTA (Lynk.id)</label><input id="bcUrl" class="form-input" value="' + esc(b ? b.ctaUrl : '') + '" placeholder="https://lynk.id/…"></div></div>' +
-      '<div class="grid2"><div><label class="form-label">Urutan</label><input id="bcSort" type="number" class="form-input" value="' + (b && b.sort ? b.sort : '') + '"></div>' +
-      '<div><label class="form-label">Status</label><select id="bcStatus" class="form-input"><option value="Published"' + (!b || b.status === 'Published' ? ' selected' : '') + '>Tampilkan</option><option value="Draft"' + (b && b.status === 'Draft' ? ' selected' : '') + '>Draft</option></select></div></div></div>',
-    didOpen: () => { refreshImageField('bcImg'); refreshIcons(); },
-    preConfirm: () => {
-      const v = { id: b ? b.id : '', title: document.getElementById('bcTitle').value.trim(), schedule: document.getElementById('bcSched').value.trim(), productId: document.getElementById('bcProd').value,
-        description: document.getElementById('bcDesc').value.trim(), posterFileId: IMG.bcImg.fileId, posterUrl: IMG.bcImg.fileId ? '' : IMG.bcImg.url,
-        priceLabel: document.getElementById('bcPrice').value.trim(), quotaLabel: document.getElementById('bcQuota').value.trim(), ctaLabel: document.getElementById('bcCta').value.trim(),
-        ctaUrl: document.getElementById('bcUrl').value.trim(), sort: Number(document.getElementById('bcSort').value) || 0, status: document.getElementById('bcStatus').value };
-      if (v.title.length < 3) return Swal.showValidationMessage('Judul minimal 3 karakter.');
-      if (v.ctaUrl && !/^https?:\/\//i.test(v.ctaUrl)) return Swal.showValidationMessage('Link CTA harus diawali https://');
-      return v;
-    }
-  });
-  if (!r.isConfirmed) return;
-  if (toastRes(await api('saveBootcamp', r.value))) Admin.fetch('bootcampsAdmin');
-}
+// v3.4: modul PAMERAN KARYA → js/admin-karya.js · modul BOOTCAMP → js/admin-bootcamp.js
 
 
 // ════════════════════════════════════════════════════════════

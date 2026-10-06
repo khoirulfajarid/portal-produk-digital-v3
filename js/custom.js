@@ -113,7 +113,7 @@ function renderCustomWizard() {
     body = '<div class="grid gap-4">' +
       '<div><label class="form-label">Nama Lengkap *</label><input id="cwName" class="form-input" value="' + esc(d.fullName) + '" placeholder="Nama sesuai identitas"></div>' +
       '<div><label class="form-label">Email</label><input class="form-input" value="' + esc(AppState.email) + '" disabled></div>' +
-      '<div><label class="form-label">No. WhatsApp *</label><input id="cwWa" class="form-input" inputmode="numeric" maxlength="16" value="' + esc(d.whatsapp) + '" placeholder="087818485245"><p class="text-xs text-muted mt-1">Format 08xxxxxxxxxx, dipakai Admin untuk konfirmasi.</p></div>' +
+      '<div><label class="form-label">No. WhatsApp *</label><input id="cwWa" class="form-input" inputmode="tel" autocomplete="tel" maxlength="22" value="' + esc(d.whatsapp) + '" placeholder="087818485245"><p class="text-xs text-muted mt-1">Format 08xxxxxxxxxx, dipakai Admin untuk konfirmasi.</p></div>' +
       '<div><label class="form-label">Profesi *</label><input id="cwProf" class="form-input" value="' + esc(d.profession) + '" placeholder="mis. Guru, Pemilik Toko, Staf TU"></div></div>';
   } else if (CW.step === 2) {
     body = '<div class="disclaimer-box">' + esc(c.disclaimer) + '</div>' +
@@ -180,7 +180,7 @@ function customWizardGo(dir) {
   if (dir > 0) {
     if (CW.step === 1) {
       if (d.fullName.length < 3) return showToast('Lengkapi data', 'Nama lengkap minimal 3 karakter.', 'warning');
-      if (!isValidWa(d.whatsapp)) return showToast('No. WhatsApp tidak valid', 'Format 08xxxxxxxxxx, contoh 087818485245.', 'warning');
+      if (!isValidWa(d.whatsapp)) return showToast('No. WhatsApp tidak valid', WA_HINT, 'warning');
       if (d.profession.length < 2) return showToast('Lengkapi data', 'Profesi wajib diisi.', 'warning');
     }
     if (CW.step === 2 && !d.agreeDisclaimer) return showToast('Wajib disetujui', 'Centang "paham dan setuju" untuk melanjutkan.', 'warning');
@@ -330,7 +330,7 @@ async function openRegisterDialog(prefillEmail, reason) {
       '<p class="text-sm text-muted">' + esc(reason || 'Isi data berikut. Akun aktif setelah disetujui Admin — kabar dikirim lewat email/WhatsApp.') + '</p>' +
       '<div><label class="form-label">Nama Lengkap *</label><input id="rgName" class="form-input" value="' + esc(saved.name || '') + '"></div>' +
       '<div><label class="form-label">Email *</label><input id="rgEmail" type="email" class="form-input" value="' + esc(typeof prefillEmail === 'string' ? prefillEmail : (saved.email || '')) + '" autocomplete="off"></div>' +
-      '<div><label class="form-label">No. WhatsApp *</label><input id="rgWa" class="form-input" inputmode="numeric" placeholder="087818485245" value="' + esc(saved.whatsapp || '') + '"></div>' +
+      '<div><label class="form-label">No. WhatsApp *</label><input id="rgWa" class="form-input" inputmode="tel" autocomplete="tel" placeholder="0878… atau +60…" value="' + esc(saved.whatsapp || '') + '"></div>' +
       '<div><label class="form-label">Profesi *</label><input id="rgProf" class="form-input" placeholder="mis. Guru, Pemilik Usaha"></div>' +
       '<div><label class="form-label">Keperluan (opsional)</label><input id="rgNote" class="form-input" placeholder="mis. Ingin pesan aplikasi custom"></div></div>',
     preConfirm: () => {
@@ -338,7 +338,7 @@ async function openRegisterDialog(prefillEmail, reason) {
         whatsapp: normWa(document.getElementById('rgWa').value), profession: document.getElementById('rgProf').value.trim(), note: document.getElementById('rgNote').value.trim() };
       if (v.fullName.length < 3) return Swal.showValidationMessage('Nama lengkap minimal 3 karakter.');
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.email)) return Swal.showValidationMessage('Email tidak valid.');
-      if (!isValidWa(v.whatsapp)) return Swal.showValidationMessage('No. WhatsApp wajib format 08xxxxxxxxxx.');
+      if (!isValidWa(v.whatsapp)) return Swal.showValidationMessage(WA_INVALID);
       if (v.profession.length < 2) return Swal.showValidationMessage('Profesi wajib diisi.');
       Swal.showLoading();
       return api('register', v).then(res => {

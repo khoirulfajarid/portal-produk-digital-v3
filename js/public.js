@@ -60,6 +60,7 @@ function renderExplore() {
   if (!root || !AppState.pub) return;
   const d = AppState.pub, s = d.settings || {};
   const apps = d.apps || [], classes = d.classes || [], boots = d.bootcamps || [], shows = d.showcase || [];
+  const guides = (d.guides && d.guides.list) || [], scfg = d.showcaseConfig || {};
 
   const hero =
     '<section class="hero">' +
@@ -72,6 +73,7 @@ function renderExplore() {
             (apps.length ? '<button class="btn-primary !w-auto" onclick="scrollToId(\'secApps\')"><i data-lucide="app-window" class="w-4 h-4"></i> Lihat Aplikasi</button>' : '') +
             ((boots.length || classes.length) ? '<button class="btn-ghost !w-auto" onclick="scrollToId(\'secClass\')"><i data-lucide="graduation-cap" class="w-4 h-4"></i> Kelas & Bootcamp</button>' : '') +
             (s.customEnabled ? '<button class="btn-ghost !w-auto" onclick="scrollToId(\'secCustom\')"><i data-lucide="wand-sparkles" class="w-4 h-4"></i> Aplikasi Custom</button>' : '') +
+            (guides.length ? '<button class="btn-ghost !w-auto" onclick="scrollToId(\'secGuide\')"><i data-lucide="book-open" class="w-4 h-4"></i> Panduan</button>' : '') +
             '<button class="btn-ghost !w-auto" onclick="askAdmin(\'WhatsApp\', \'Info umum\')"><i data-lucide="message-circle" class="w-4 h-4"></i> Tanya Admin</button>' +
           '</div>' +
         '</div>' +
@@ -88,9 +90,16 @@ function renderExplore() {
       '<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">' + boots.map(bootcampCard).join('') + classes.map(publicClassCard).join('') + '</div></section>'
     : '';
 
+  // v3.4: pameran karya berjalan otomatis (berhenti saat kursor di atasnya → bisa digeser manual)
   const showHtml = shows.length
-    ? '<section id="secShow" class="page-wrap !pb-4">' + sectionHead('trophy', 'Pameran Karya Member', 'Hasil karya terbaik para member kami.') +
-      '<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">' + shows.map(showcaseCard).join('') + '</div></section>'
+    ? '<section id="secShow" class="page-wrap !pb-4">' + sectionHead('trophy', scfg.title || 'Pameran Karya Member', scfg.subtitle || 'Hasil karya terbaik para member kami.') +
+      showcaseMarquee(shows, scfg.speed) + '</section>'
+    : '';
+
+  // v3.4: section Panduan (dokumen PDF/PPT & video YouTube dari Admin)
+  const guideHtml = guides.length
+    ? '<section id="secGuide" class="page-wrap !pb-4">' + sectionHead('book-open', d.guides.title || 'Panduan', d.guides.subtitle || '') +
+      '<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">' + guides.map(guideCard).join('') + '</div></section>'
     : '';
 
   const customHtml = s.customEnabled
@@ -128,11 +137,13 @@ function renderExplore() {
       '<p class="text-center text-xs text-muted mt-10">© ' + new Date().getFullYear() + ' ' + esc(s.appName || '') + '</p>' +
     '</section>';
 
-  const empty = (!apps.length && !classes.length && !boots.length && !shows.length && !s.customEnabled)
+  const empty = (!apps.length && !classes.length && !boots.length && !shows.length && !guides.length && !s.customEnabled)
     ? '<div class="page-wrap">' + emptyState('package-open', 'Belum ada yang dipamerkan', 'Admin belum menambahkan aplikasi, kelas, atau karya member.') + '</div>' : '';
 
-  root.innerHTML = hero + appsHtml + classHtml + customHtml + showHtml + empty + cta;
+  root.innerHTML = hero + appsHtml + classHtml + customHtml + showHtml + guideHtml + empty + cta;
+  initMarquees(root);
   refreshIcons();
+  const navG = document.getElementById('navGuides'); if (navG) navG.hidden = !guides.length;
 }
 
 function sectionHead(icon, title, sub) {
@@ -172,30 +183,38 @@ function publicClassCard(p) {
 }
 
 function bootcampCard(b) {
+  const ses = b.sessions || [];
   return '<article class="product-card">' +
     '<div class="product-thumb">' + img(b.poster, b.title, '', 'Bootcamp') + '<span class="owned-badge" style="background:var(--indigo)"><i data-lucide="calendar" class="w-3.5 h-3.5"></i> Bootcamp</span></div>' +
     '<div class="p-5 flex flex-col flex-1">' +
       '<h3 class="text-[17px] font-semibold leading-snug text-main">' + esc(b.title) + '</h3>' +
       (b.schedule ? '<p class="mt-2 text-sm text-main inline-flex items-center gap-1.5"><i data-lucide="clock" class="w-4 h-4 text-accent"></i> ' + esc(b.schedule) + '</p>' : '') +
+      (ses.length ? '<p class="mt-2 text-sm text-main inline-flex items-center gap-1.5"><i data-lucide="calendar-days" class="w-4 h-4 text-accent"></i> ' + ses.length + '× pertemuan · mulai ' + esc(fmtWib(ses[0].startAt, true)) + '</p>' : '') +
+      ((b.accessTitles || []).length ? '<p class="mt-1 text-xs text-muted">Akses kelas: ' + esc(b.accessTitles.join(', ')) + '</p>' : '') +
       '<p class="mt-2 text-sm text-muted flex-1 whitespace-pre-line line-clamp-4">' + esc(b.description) + '</p>' +
       '<div class="flex flex-wrap gap-2 mt-3">' +
         (b.priceLabel ? '<span class="badge badge-success">' + esc(b.priceLabel) + '</span>' : '') +
         (b.quotaLabel ? '<span class="badge badge-warning">' + esc(b.quotaLabel) + '</span>' : '') +
       '</div>' +
       (b.ctaUrl ? '<button class="btn-primary w-full mt-4" onclick="openLink(' + jsArg(b.ctaUrl) + ')"><i data-lucide="arrow-right" class="w-4 h-4"></i> ' + esc(b.ctaLabel) + '</button>'
-                : '<button class="btn-ghost w-full mt-4" onclick="askAdmin(\'WhatsApp\', ' + jsArg('Bootcamp: ' + b.title) + ')"><i data-lucide="message-circle" class="w-4 h-4"></i> Tanya Admin</button>') +
+                : (b.regOpen ? '' : '<button class="btn-ghost w-full mt-4" onclick="askAdmin(\'WhatsApp\', ' + jsArg('Bootcamp: ' + b.title) + ')"><i data-lucide="message-circle" class="w-4 h-4"></i> Tanya Admin</button>')) +
+      (b.regOpen ? '<button class="btn-ghost w-full mt-2" onclick="openBootcampRegister(' + jsArg(b.id) + ')"><i data-lucide="key-round" class="w-4 h-4"></i> Sudah punya token? Daftar Bootcamp</button>' : '') +
     '</div></article>';
 }
 
 function showcaseCard(s) {
+  const n = (s.gallery || []).length;
   return '<article class="product-card">' +
-    '<div class="product-thumb cursor-pointer" onclick="openShowcase(' + jsArg(s.id) + ')">' + img(s.image, s.title, '', 'Karya') +
+    '<div class="product-thumb cursor-pointer" onclick="openShowcase(' + jsArg(s.id) + ')">' + img(s.image || (s.gallery || [])[0], s.title, '', 'Karya') +
       (s.featured ? '<span class="owned-badge" style="background:var(--warning)"><i data-lucide="award" class="w-3.5 h-3.5"></i> Unggulan</span>' : '') +
+      (n > 1 ? '<span class="owned-badge v4-count"><i data-lucide="images" class="w-3.5 h-3.5"></i> ' + n + '</span>' : '') +
       (s.videoEmbed ? '<span class="play-dot"><i data-lucide="play" class="w-5 h-5"></i></span>' : '') + '</div>' +
     '<div class="p-5 flex flex-col flex-1">' +
-      '<h3 class="text-[16px] font-semibold leading-snug text-main line-clamp-2">' + esc(s.title) + '</h3>' +
-      (s.memberName ? '<p class="mt-1 text-xs text-muted inline-flex items-center gap-1"><i data-lucide="user" class="w-3.5 h-3.5"></i> ' + esc(s.memberName) + '</p>' : '') +
-      '<p class="mt-2 text-sm text-muted line-clamp-2 flex-1">' + esc(s.description) + '</p>' +
+      '<div class="v4-member">' + memberAvatar(s, 40) + '<div class="min-w-0"><p class="text-sm font-semibold text-main truncate">' + esc(s.memberName || 'Member') + '</p>' +
+        (s.profession ? '<p class="text-xs text-muted truncate">' + esc(s.profession) + '</p>' : '') + '</div></div>' +
+      '<h3 class="mt-3 text-[16px] font-semibold leading-snug text-main line-clamp-2">' + esc(s.title) + '</h3>' +
+      (s.className ? '<p class="mt-1 text-xs text-accent truncate">Alumni ' + esc(s.className) + '</p>' : '') +
+      '<p class="mt-2 text-sm text-muted line-clamp-3 flex-1">' + (s.story || s.description ? '“' + esc(s.story || s.description) + '”' : '') + '</p>' +
       '<button class="btn-ghost w-full mt-4" onclick="openShowcase(' + jsArg(s.id) + ')"><i data-lucide="eye" class="w-4 h-4"></i> Lihat Karya</button>' +
     '</div></article>';
 }
@@ -205,14 +224,18 @@ function openShowcase(id) {
   const list = (AppState.m && AppState.m.showcase) || (AppState.pub && AppState.pub.showcase) || [];
   const s = list.filter(x => x.id === id)[0];
   if (!s) return;
+  const gal = s.gallery || [];
   Swal.fire({
-    width: 820, showConfirmButton: !!s.demoUrl, confirmButtonText: 'Buka Demo', showCloseButton: true,
+    width: 860, showConfirmButton: !!s.demoUrl, confirmButtonText: 'Buka Demo', showCloseButton: true,
     html: '<div style="text-align:left">' +
-      (s.videoEmbed ? '<div class="video-frame"><iframe src="' + esc(s.videoEmbed) + '" allowfullscreen allow="encrypted-media; picture-in-picture"></iframe></div>'
-                    : '<div class="rounded-xl overflow-hidden">' + img(s.image, s.title, 'style="width:100%"') + '</div>') +
+      (gal.length ? appPreviewHtml({ slides: gal.map(u => ({ image: u, caption: '' })), previewVideos: [], Title: s.title }) : '') +
+      (s.videoEmbed ? '<div class="video-frame' + (gal.length ? ' mt-4' : '') + '"><iframe src="' + esc(s.videoEmbed) + '" allowfullscreen allow="encrypted-media; picture-in-picture"></iframe></div>'
+                    : (gal.length ? '' : '<div class="rounded-xl overflow-hidden">' + img(s.image, s.title, 'style="width:100%"') + '</div>')) +
+      '<div class="v4-member mt-4">' + memberAvatar(s, 52) + '<div class="min-w-0"><p class="font-semibold text-main">' + esc(s.memberName || 'Member') + '</p>' +
+        '<p class="text-sm text-muted">' + esc([s.profession, s.className ? 'Alumni ' + s.className : ''].filter(Boolean).join(' · ')) + '</p></div></div>' +
       '<h3 class="mt-4 text-xl font-bold text-main">' + esc(s.title) + '</h3>' +
-      (s.memberName ? '<p class="text-sm text-muted mt-1">oleh ' + esc(s.memberName) + '</p>' : '') +
-      '<p class="mt-3 text-[15px] text-muted whitespace-pre-line">' + esc(s.description) + '</p></div>'
+      '<p class="mt-3 text-[15px] text-muted whitespace-pre-line">' + esc(s.story || s.description) + '</p></div>',
+    didOpen: () => { initCarousel(document.querySelector('.swal2-popup .carousel')); refreshIcons(); }
   }).then(r => { if (r.isConfirmed) openLink(s.demoUrl); });
 }
 
@@ -292,7 +315,7 @@ async function askAdmin(channel, interest) {
     html: '<div style="text-align:left;display:grid;gap:12px">' +
       '<p class="text-sm text-muted">Isi data singkat agar Admin bisa membantu Anda lebih cepat.</p>' +
       '<div><label class="form-label" for="ldName">Nama</label><input id="ldName" class="form-input" value="' + esc(saved.name || '') + '" placeholder="Nama Anda"></div>' +
-      '<div><label class="form-label" for="ldWa">No. WhatsApp</label><input id="ldWa" class="form-input" inputmode="numeric" value="' + esc(saved.whatsapp || '') + '" placeholder="087818485245"></div>' +
+      '<div><label class="form-label" for="ldWa">No. WhatsApp</label><input id="ldWa" class="form-input" inputmode="tel" autocomplete="tel" value="' + esc(saved.whatsapp || '') + '" placeholder="0878… atau +60…"><p class="text-xs text-muted mt-1">' + esc(WA_HINT) + '</p></div>' +
       '<div><label class="form-label" for="ldEmail">Email (opsional)</label><input id="ldEmail" type="email" class="form-input" value="' + esc(saved.email || '') + '" placeholder="nama@email.com"></div>' +
       '<div><label class="form-label" for="ldMsg">Pertanyaan</label><textarea id="ldMsg" class="form-input" rows="2">' + esc(interest && interest !== 'Info umum' ? 'Halo Admin, saya tertarik dengan ' + interest.replace(/^[^:]+:\s*/, '') + '.' : 'Halo Admin, saya ingin bertanya.') + '</textarea></div></div>',
     preConfirm: () => {
@@ -300,7 +323,7 @@ async function askAdmin(channel, interest) {
       const wa = normWa(document.getElementById('ldWa').value);
       const email = document.getElementById('ldEmail').value.trim();
       if (name.length < 2) return Swal.showValidationMessage('Nama wajib diisi.');
-      if (!isValidWa(wa)) return Swal.showValidationMessage('No. WhatsApp wajib format 08xxxxxxxxxx (contoh 087818485245).');
+      if (!isValidWa(wa)) return Swal.showValidationMessage(WA_INVALID);
       return { name: name, whatsapp: wa, email: email, msg: document.getElementById('ldMsg').value.trim() };
     }
   });
@@ -508,13 +531,14 @@ async function openRedeemDialog(prefillEmail) {
       if (!logged && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return Swal.showValidationMessage('Email tidak valid.');
       Swal.showLoading();
       return api('redeem', { code: code, email: email }).then(res => {
+        if (!res.success && res.data && res.data.code === 'BOOTCAMP_TOKEN') { setTimeout(() => openBootcampRegister(res.data.bootId, { token: code, email: email }), 50); return { bootcamp: true }; }
         if (!res.success) { Swal.hideLoading(); Swal.showValidationMessage(res.message); return false; }
         return res;
       });
     },
     allowOutsideClick: () => !Swal.isLoading()
   });
-  if (!r.isConfirmed || !r.value) return;
+  if (!r.isConfirmed || !r.value || r.value.bootcamp) return;
   const res = r.value, d = res.data;
   if (d.token) { Login.pushHistory(d.email); saveSession(d); }
   await Swal.fire({ icon: 'success', title: d.isNew ? 'Akun dibuat & akses aktif!' : 'Berhasil!', text: res.message, confirmButtonText: 'Buka Sekarang' });

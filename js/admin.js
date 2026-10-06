@@ -15,8 +15,9 @@ const ADMIN_MENU = [
     { id: 'crm', icon: 'contact', label: 'CRM Member', badge: true },
     { id: 'access', icon: 'user-plus', label: 'Pemberian Akses' }] },
   { group: 'Konten', items: [
-    { id: 'showcase', icon: 'trophy', label: 'Pameran Karya' },
-    { id: 'bootcamps', icon: 'calendar-days', label: 'Bootcamp' },
+    { id: 'bootcamps', icon: 'calendar-days', label: 'Bootcamp', badge: true },
+    { id: 'showcase', icon: 'trophy', label: 'Pameran Karya', badge: true },
+    { id: 'guides', icon: 'book-open', label: 'Panduan' },
     { id: 'announcements', icon: 'megaphone', label: 'Pengumuman' },
     { id: 'helpdesk', icon: 'life-buoy', label: 'Helpdesk' }] },
   { group: 'Komunikasi', items: [
@@ -38,7 +39,10 @@ const ACTION_LABELS = {
   KEY_GENERATE: 'Kode Dibuat', KEY_EDIT: 'Kode Diubah', KEY_DELETE: 'Kode Dihapus',
   HELPDESK_SAVE: 'Artikel Helpdesk', HELPDESK_DELETE: 'Artikel Dihapus', HELPCAT_SAVE: 'Kategori Helpdesk', HELPCAT_DELETE: 'Kategori Dihapus',
   ANNOUNCE_SAVE: 'Pengumuman', ANNOUNCE_DELETE: 'Pengumuman Dihapus', SHOWCASE_SAVE: 'Karya Disimpan', SHOWCASE_DELETE: 'Karya Dihapus',
-  BOOTCAMP_SAVE: 'Bootcamp Disimpan', BOOTCAMP_DELETE: 'Bootcamp Dihapus', NOTIF_SAVE: 'Notifikasi Diubah',
+  BOOTCAMP_SAVE: 'Bootcamp Disimpan', BOOTCAMP_DELETE: 'Bootcamp Dihapus', BOOTCAMP_REGISTER: 'Daftar Bootcamp', BOOTCAMP_ATTEND: 'Absen Bootcamp',
+  BOOTCAMP_APPROVE: 'Peserta Disetujui', BOOTCAMP_REJECT: 'Peserta Ditolak', BOOTCAMP_GRANT: 'Akses Peserta Bootcamp', BOOTCAMP_ATTEND_ADMIN: 'Absen oleh Admin',
+  SHOWCASE_SUBMIT: 'Ajukan Karya', SHOWCASE_APPROVE: 'Karya Disetujui', SHOWCASE_REJECT: 'Karya Ditolak', SHOWCASE_CONFIG: 'Pengaturan Pameran',
+  GUIDE_SAVE: 'Panduan Disimpan', GUIDE_DELETE: 'Panduan Dihapus', GUIDE_CONFIG: 'Judul Panduan', NOTIF_SAVE: 'Notifikasi Diubah',
   BLAST_CREATE: 'Blast Dibuat', BLAST_PAUSE: 'Blast Dijeda', BLAST_RESUME: 'Blast Dilanjutkan', BLAST_CANCEL: 'Blast Dibatalkan', BLAST_RETRY: 'Blast Diulang', BLAST_RUN: 'Blast Manual', BLAST_DELETE: 'Blast Dihapus',
   SETTINGS_SAVE: 'Pengaturan Disimpan', BACKUP: 'Backup', LOG_ARCHIVE: 'Log Diarsipkan', IMPORT_RUN: 'Import Data', IMPORT_CSV: 'Import CSV', TRIGGER_INSTALL: 'Trigger Dipasang'
 };
@@ -61,7 +65,7 @@ const Admin = {
     const first = await this.prefetch(['dashboard', 'ordersAdmin', 'productsAdmin', 'crm', 'customAdmin']);
     if (!first || !first.success) { this.booted = false; return; }
     const idle = window.requestIdleCallback || (fn => setTimeout(fn, 1500));
-    idle(() => this.prefetch(['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin'], true));
+    idle(() => this.prefetch(['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin', 'guidesAdmin'], true));
     // Badge menu (pesanan/pendaftar/custom): tiap 90 dtk saat aktif, 5 mnt saat tidak ada interaksi, berhenti saat tab tersembunyi
     Activity.reset('kpi');
     clearInterval(AppState.timers.kpi);
@@ -78,7 +82,7 @@ const Admin = {
 
   /** Tombol "Segarkan": ambil ulang dari Sheets (lewati cache server) — menu inti dalam 1 panggilan. */
   refreshAll() {
-    ['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin', 'accessHistory']
+    ['showcaseAdmin', 'notifConfig', 'keysAdmin', 'helpdeskAdmin', 'announcementsAdmin', 'bootcampsAdmin', 'settingsAdmin', 'blastAdmin', 'accessHistory', 'guidesAdmin']
       .forEach(a => { this.stale[a] = 1; });                  // menu lain: diambil segar dari Sheets saat dibuka
     return this.fetchMany(['dashboard', 'ordersAdmin', 'productsAdmin', 'crm', 'customAdmin'], { _fresh: true });
   },
@@ -151,6 +155,8 @@ function setDashBadges(k) {
   setNavBadge('orders', k.pending);
   setNavBadge('custom', k.customNew || 0);
   setNavBadge('crm', k.pendingReg || 0);
+  setNavBadge('bootcamps', k.bootcampPending || 0);     // v3.4: bukti peserta menunggu verifikasi
+  setNavBadge('showcase', k.showcasePending || 0);      // v3.4: pengajuan karya member
 }
 
 function renderSidebarBrand() {

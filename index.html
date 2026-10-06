@@ -20,10 +20,10 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
   <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css" rel="stylesheet">
-  <link rel="stylesheet" href="css/base.css?v=3.3">
-  <link rel="stylesheet" href="css/app.css?v=3.3">
+  <link rel="stylesheet" href="css/base.css?v=3.4">
+  <link rel="stylesheet" href="css/app.css?v=3.4">
   <!-- Tailwind v3 hasil build (pengganti CDN Play: tanpa kompilasi di browser → jauh lebih ringan di HP) -->
-  <link rel="stylesheet" href="css/tw.css?v=3.3">
+  <link rel="stylesheet" href="css/tw.css?v=3.4">
 
   <!-- Skrip: defer = tidak memblokir tampilan. jQuery/DataTables/Chart.js & modul admin dimuat otomatis hanya untuk Superadmin -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js" defer></script>
@@ -46,6 +46,7 @@
         <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secApps'),50)">Aplikasi</button>
         <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secClass'),50)">Kelas & Bootcamp</button>
         <button class="topnav-link" onclick="go('explore');setTimeout(()=>scrollToId('secShow'),50)">Karya Member</button>
+        <button class="topnav-link" id="navGuides" hidden onclick="go('explore');setTimeout(()=>scrollToId('secGuide'),50)">Panduan</button>
       </nav>
       <div class="flex items-center gap-2">
         <button type="button" onclick="toggleDarkMode()" class="icon-btn" title="Ganti tema"><i data-lucide="moon-star" class="w-[18px] h-[18px]"></i></button>
@@ -163,11 +164,12 @@
 
   <!-- Urutan penting: config → core → modul -->
   <!-- v3.2: ikon = subset Lucide (28 KB, sebelumnya 354 KB). Modul admin (admin*.js) dimuat otomatis khusus Superadmin. -->
-  <script src="js/config.js?v=3.3" defer></script>
-  <script src="js/icons.js?v=3.3" defer></script>
-  <script src="js/core.js?v=3.3" defer></script>
-  <script src="js/public.js?v=3.3" defer></script>
-  <script src="js/member.js?v=3.3" defer></script>
-  <script src="js/custom.js?v=3.3" defer></script>
+  <script src="js/config.js?v=3.4" defer></script>
+  <script src="js/icons.js?v=3.4" defer></script>
+  <script src="js/core.js?v=3.4" defer></script>
+  <script src="js/public.js?v=3.4" defer></script>
+  <script src="js/member.js?v=3.4" defer></script>
+  <script src="js/custom.js?v=3.4" defer></script>
+  <script src="js/v34.js?v=3.4" defer></script>
 </body>
 </html>

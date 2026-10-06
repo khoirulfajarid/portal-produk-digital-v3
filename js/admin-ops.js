@@ -10,7 +10,7 @@
 // ════════════════════════════════════════════════════════════
 const AUDIENCE_OPTS = [
   ['members_all', 'Semua member aktif'], ['members_product', 'Pemilik produk tertentu'], ['members_incomplete', 'Member yang datanya belum lengkap'],
-  ['leads', 'Non-member (lead Open Access)'], ['custom', 'Daftar manual (email / no. WA)']
+  ['leads', 'Non-member (lead Open Access)'], ['custom', 'Daftar manual (email / no. WA)'], ['bootcamp', 'Peserta Bootcamp (semua bootcamp)']
 ];
 
 adminRoute('blast', {
@@ -261,7 +261,7 @@ ADMIN_RENDER.notifConfig = function (d) {
       '<p class="text-sm text-muted mt-2">Aktif: <b id="ncWa">0</b> dari ' + events.length + ' notifikasi.</p>' +
       '<div class="grid gap-3 mt-4"><div><label class="form-label">Token API Fonnte</label><input id="nfToken" class="form-input mono" type="password" autocomplete="new-password" placeholder="' + (d.fonnteConfigured ? 'Tersimpan: ' + esc(d.fonnteTokenMasked) + ' — isi untuk mengganti' : 'Tempel token dari dashboard Fonnte') + '">' +
         '<p class="text-xs text-muted mt-1">Token disimpan aman di Script Properties (bukan di Sheets). Isi "-" untuk menghapus.</p></div>' +
-      '<div><label class="form-label">No. WhatsApp Admin (penerima notifikasi Admin)</label><input id="nfAdminWa" class="form-input" inputmode="numeric" value="' + esc(d.adminWhatsApp) + '" placeholder="087818485245"></div></div>' +
+      '<div><label class="form-label">No. WhatsApp Admin (penerima notifikasi Admin)</label><input id="nfAdminWa" class="form-input" inputmode="tel" value="' + esc(d.adminWhatsApp) + '" placeholder="087818485245"></div></div>' +
       '<div class="flex gap-2 mt-5"><input id="tWa" class="form-input" placeholder="No. WA tujuan tes" value="' + esc(d.adminWhatsApp) + '"><button class="btn-ghost !w-auto" onclick="testNotif(\'wa\',this)">Kirim Tes</button></div></div>' +
     '</div>' +
     '<div class="notice mt-6"><i data-lucide="info" class="w-5 h-5 flex-none"></i><p class="text-sm flex-1">Daftar di bawah adalah <b>semua notifikasi otomatis</b> yang dipakai aplikasi. Notifikasi terkirim hanya bila <b>kanal aktif</b> dan sakelar kejadiannya <b>aktif</b>. Blast WA/Email diatur terpisah di menu Blast.</p></div>' +
@@ -283,7 +283,7 @@ async function saveNotif(btn) {
   const cfg = { email: {}, wa: {} };
   document.querySelectorAll('#notifBox [data-ch]').forEach(i => cfg[i.dataset.ch][i.dataset.k] = i.checked);
   const wa = normWa(document.getElementById('nfAdminWa').value);
-  if (wa && !isValidWa(wa)) return showToast('WA admin tidak valid', 'Format 08xxxxxxxxxx', 'error');
+  if (wa && !isValidWa(wa)) return showToast('WA admin tidak valid', WA_HINT, 'error');
   const res = await withBusy(btn, 'Menyimpan…', () => api('saveNotifConfig', Object.assign(cfg, { adminWhatsApp: wa, fonnteToken: document.getElementById('nfToken').value.trim() })));
   if (toastRes(res)) { Admin.fetch('notifConfig'); Store.del(Admin.key('systemStatus')); }
 }

@@ -10,6 +10,8 @@
 const MEMBER_MENU = [
   { id: 'home', icon: 'layout-grid', label: 'Beranda' },
   { id: 'library', icon: 'graduation-cap', label: 'Kelas Saya' },
+  { id: 'bootcamp', icon: 'calendar-days', label: 'Bootcamp' },          // v3.4: jadwal, link pertemuan & absensi
+  { id: 'karya', icon: 'trophy', label: 'Pameran Karya' },                 // v3.4: ajukan testimoni karya
   { id: 'custom', icon: 'wand-sparkles', label: 'Aplikasi Custom' },
   { id: 'orders', icon: 'receipt', label: 'Pesanan' },
   { id: 'helpdesk', icon: 'life-buoy', label: 'Helpdesk' }
@@ -53,6 +55,8 @@ const Member = {
     if (document.getElementById('helpRoot')) renderHelpdesk();
     if (document.getElementById('customRoot') && typeof renderCustomList === 'function') renderCustomList();
     if (document.getElementById('customDetailRoot') && typeof renderCustomDetail === 'function') renderCustomDetail();
+    if (document.getElementById('bootRoot') && typeof renderMyBootcamp === 'function') renderMyBootcamp();      // v3.4
+    if (document.getElementById('karyaRoot') && typeof renderKarya === 'function') renderKarya();
   },
 
   /** Segarkan diam-diam bila data sudah > 60 detik (dipanggil saat pindah halaman). */
@@ -489,13 +493,13 @@ async function openProfileDialog(productId) {
       '<p class="text-sm text-muted">Data wajib diisi dengan benar. Satu nomor WhatsApp hanya untuk satu akun.</p>' +
       '<div><label class="form-label">Email</label><input class="form-input" value="' + esc(AppState.email) + '" disabled></div>' +
       '<div><label class="form-label" for="pfNick">Nama Panggilan *</label><input id="pfNick" class="form-input" maxlength="40" value="' + esc(p.nickname || '') + '" placeholder="mis. Rina"></div>' +
-      '<div><label class="form-label" for="pfWa">No. WhatsApp *</label><input id="pfWa" class="form-input" inputmode="numeric" maxlength="16" value="' + esc(p.whatsapp || '') + '" placeholder="087818485245">' +
-      '<p class="text-xs text-muted mt-1">Format: diawali <b>08</b>, 10–13 digit, tanpa spasi. Contoh: <span class="mono">087818485245</span></p></div></div>',
+      '<div><label class="form-label" for="pfWa">No. WhatsApp *</label><input id="pfWa" class="form-input" inputmode="tel" autocomplete="tel" maxlength="22" value="' + esc(p.whatsapp || '') + '" placeholder="087818485245">' +
+      '<p class="text-xs text-muted mt-1">Nomor Indonesia diawali <b>08</b> (contoh <span class="mono">087818485245</span>). Nomor luar negeri: awali dengan <b>+</b> dan kode negara, mis. <span class="mono">+60 12 345 6789</span>.</p></div></div>',
     preConfirm: () => {
       const nick = document.getElementById('pfNick').value.trim();
       const wa = normWa(document.getElementById('pfWa').value);
       if (nick.length < 2) return Swal.showValidationMessage('Nama panggilan minimal 2 karakter.');
-      if (!isValidWa(wa)) return Swal.showValidationMessage('No. WhatsApp wajib format 08xxxxxxxxxx (contoh 087818485245).');
+      if (!isValidWa(wa)) return Swal.showValidationMessage(WA_INVALID);
       Swal.showLoading();
       return api('updateProfile', { nickname: nick, whatsapp: wa }).then(res => {
         if (!res.success) { Swal.hideLoading(); Swal.showValidationMessage(res.message); return false; }
